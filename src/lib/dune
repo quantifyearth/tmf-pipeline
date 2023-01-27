@@ -1,0 +1,10 @@
+(library
+ (name evaluations)
+ (libraries
+  current
+  current_git
+  current_github
+  current_docker
+  dockerfile
+  obuilder
+  obuilder-spec))
