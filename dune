@@ -1,1 +1,3 @@
 (vendored_dirs vendor)
+
+(dirs :standard \ var rsync zfs.img)

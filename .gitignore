@@ -2,6 +2,7 @@ _build
 .token
 var
 rsync
+zfs.img
 .vscode
 .slack
-.token
+.github-token-file

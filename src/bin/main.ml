@@ -20,7 +20,7 @@ let has_role user role =
           true (* These users have all roles *)
       | _ -> role = `Viewer)
 
-let _label l t =
+let label l t =
   let open Current.Syntax in
   Current.component "%s" l
   |> let> v = t in
@@ -37,16 +37,15 @@ let read_channel_uri path =
   with ex ->
     Fmt.failwith "Failed to read slack URI from %S: %a" path Fmt.exn ex
 
-(* *)
 module Current_obuilder = Evaluations.Current_obuilder
 
-let pipeline ?auth config store_config sandbox_config engine_config slack =
+let pipeline ?auth config builder engine_config slack =
   let _channel = Some (read_channel_uri slack) in
   let _web_ui =
     let base = uri in
     fun repo -> Uri.with_query' base [ ("repo", repo) ]
   in
-  let _others, _wlts =
+  let others, wlts =
     List.fold_left
       (fun (others, wlt) v ->
         match String.split_on_char '_' v with
@@ -55,22 +54,33 @@ let pipeline ?auth config store_config sandbox_config engine_config slack =
       ([], []) config.Config.projects
   in
   let pipeline () =
-    let commit = Evaluations.Repos.evaluations () in
+    let commit = Evaluations.Repos.evaluations "pf341" in
     let spec = Current.return Evaluations.Python.spec in
     let img =
-      Current_obuilder.build ~label:"4C_evaluations" store_config
-        ("obuilder-state", sandbox_config)
-        spec (`Git commit)
+      Current_obuilder.build ~label:"4C_evaluations" spec builder (`Git commit)
     in
-    (* let others = List.map (fun project_name -> Evaluations.evaluate ~project_name img) others in
-       let wlts = List.map (fun project_name -> Evaluations.evaluate ~project_name img) wlts in
-       let wlts =
-         let input = label "WLT Projects" img in
-         let _, v = Current.collapse_list ~key:"projects" ~value:"wlt" ~input wlts in
-         v
-       in *)
-    (* Current.all (others @ [ wlts ]) *)
-    Current.ignore_value img
+    let others =
+      List.map
+        (fun project_name ->
+          Current.ignore_value
+          @@ Evaluations.evaluate ~project_name ~builder img)
+        others
+    in
+    let wlts =
+      List.map
+        (fun project_name ->
+          Current.ignore_value
+          @@ Evaluations.evaluate ~project_name ~builder img)
+        wlts
+    in
+    let wlts =
+      let input = label "WLT Projects" img in
+      let _, v =
+        Current.collapse_list ~key:"projects" ~value:"wlt" ~input wlts
+      in
+      v
+    in
+    Current.all (others @ [ wlts ])
   in
   let custom_css = "custom.css" in
   let engine = Current.Engine.create ~config:engine_config pipeline in
@@ -96,6 +106,8 @@ let pipeline ?auth config store_config sandbox_config engine_config slack =
    https://<user>:<token>@github.com URL to set globally... *)
 
 let init_git token_url =
+  let token_path = Fpath.v token_url in
+  assert (Bos.OS.File.exists token_path |> Result.get_ok);
   match
     Bos.OS.Cmd.run
       Bos.Cmd.(v "git" % "config" % "--global" % "credential.helper" % "store")
@@ -104,10 +116,10 @@ let init_git token_url =
   | Ok () ->
       let home = Sys.getenv "HOME" in
       let path = Fpath.(v home / ".git-credentials") in
-      Bos.OS.File.write path token_url
+      Bos.OS.File.write path (Bos.OS.File.read token_path |> Result.get_ok)
 
 let token_url =
-  Arg.required
+  Arg.value
   @@ Arg.opt Arg.(some string) None
   @@ Arg.info ~doc:"A github <user>:<token> URL" ~docv:"GITHUB_TOKEN_FILE"
        [ "github-token-file" ]
@@ -128,13 +140,25 @@ let store =
 let cmd =
   let doc = "Deployer for 4C sites and projects" in
   let main () config auth store sandbox engine_config mode token_url slack =
-    match init_git token_url with
-    | Error (`Msg m) -> failwith m
-    | Ok () -> (
+    match Option.map init_git token_url with
+    | Some (Error (`Msg m)) -> failwith m
+    | Some (Ok ()) | None -> (
         Logs.info (fun f -> f "Successfully set credentials");
-        let engine, site =
-          pipeline ?auth config store sandbox engine_config slack
+        let builder =
+          let open Lwt.Infix in
+          Obuilder.Store_spec.to_store Obuilder.Rsync_store.Hardlink store
+          >>= fun (Store ((module Store), store)) ->
+          Obuilder.Sandbox.create ~state_dir:"obuilder-state" sandbox
+          >>= fun sandbox ->
+          let module Builder =
+            Obuilder.Builder (Store) (Obuilder.Sandbox) (Obuilder.Docker)
+          in
+          Lwt.return
+          @@ Current_obuilder.Builder
+               ((module Builder), Builder.v ~store ~sandbox)
         in
+        let builder = Lwt_main.run builder in
+        let engine, site = pipeline ?auth config builder engine_config slack in
         match
           Lwt_main.run
             (Lwt.choose
