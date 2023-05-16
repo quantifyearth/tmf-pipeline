@@ -136,7 +136,8 @@ let build ?level ?schedule ?label ?pool spec builder src =
 let run ?level ?schedule ?label ?pool builder ?(rom=[]) ~snapshot cmd =
   let open Current.Syntax in
   Current.component "run%a" pp_sp_label label
-  |> let> (snapshot : Raw.Build.Value.t) = snapshot in
+  |> let> (snapshot : Raw.Build.Value.t) = snapshot
+     and> rom = Current.list_seq rom in
      let spec = snapshot.ctx.spec in
      let spec =
        Obuilder_spec.stage ~child_builds:spec.child_builds ~from:spec.from

@@ -38,7 +38,7 @@ module Setup = struct
 end
 
 let snapshots_to_rom (lst : (Current_obuilder.Raw.Build.Value.t Current.t * string * string) list) =
-  List.map (fun (v, build_dir, target) -> 
+  List.map (fun (v, build_dir, target) ->
     let+ snap : Current_obuilder.Raw.Build.Value.t = v in
     Obuilder_spec.Rom.of_build ~hash:snap.snapshot ~build_dir target
   ) lst 
@@ -58,7 +58,7 @@ let evaluate ~project_name ~builder img =
        ~script_path:"main.py" setup
   in
   let permanence =
-    let* rom = Current.list_seq @@ snapshots_to_rom [ 
+    let rom = snapshots_to_rom [ 
       additionality, "/usr/src/app", "/additionality/input";
       leakage, "/usr/src/app", "/leakage/input"
     ] in
