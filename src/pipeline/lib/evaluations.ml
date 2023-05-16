@@ -16,9 +16,9 @@ module Python = struct
         copy ~from:`Context [ "." ] ~dst:"./";
       ]
 
-  let run ?label ?(args = []) ?script_path ~builder snapshot =
-    Current_obuilder.run ?label builder ~snapshot
-      ~cmd:(String.concat " " (("python" :: Option.to_list script_path) @ args))
+  let run ?label ?(args = []) ?script_path ?rom ~builder snapshot =
+    Current_obuilder.run ?label builder ~snapshot ?rom
+      (String.concat " " (("python" :: Option.to_list script_path) @ args))
 end
 
 module Repos = struct
@@ -37,9 +37,12 @@ module Setup = struct
       ~script_path:"main.py" ~args:[] img
 end
 
-let merge_builds a b =
-  let* a and* _ = b in
-  Current.return a
+let snapshots_to_rom (lst : (Current_obuilder.Raw.Build.Value.t Current.t * string * string) list) =
+  List.map (fun (v, build_dir, target) -> 
+    let+ snap : Current_obuilder.Raw.Build.Value.t = v in
+    Obuilder_spec.Rom.of_build ~hash:snap.snapshot ~build_dir target
+  ) lst 
+
 
 let evaluate ~project_name ~builder img =
   let python_run = Python.run ~builder in
@@ -47,17 +50,22 @@ let evaluate ~project_name ~builder img =
   let additionality =
     python_run
        ~label:("additionality " ^ String.lowercase_ascii project_name)
-       ~args:[ "-c"; "print('HAHAHA todo...')" ] setup
+       ~script_path:"main.py" setup
   in
   let leakage =
     python_run
        ~label:("leakage " ^ String.lowercase_ascii project_name)
-       ~args:[ "-c"; "print('HAHAHA todo...')" ] setup
+       ~script_path:"main.py" setup
   in
   let permanence =
+    let* rom = Current.list_seq @@ snapshots_to_rom [ 
+      additionality, "/usr/src/app", "/additionality/input";
+      leakage, "/usr/src/app", "/leakage/input"
+    ] in
     python_run
-        ~label:("additionality " ^ String.lowercase_ascii project_name)
-        ~args:[ "-c"; "print('HAHAHA todo...')" ] (merge_builds additionality leakage)
+        ~rom
+        ~label:("permanence " ^ String.lowercase_ascii project_name)
+        ~script_path:"main.py" setup
   in
   permanence
 

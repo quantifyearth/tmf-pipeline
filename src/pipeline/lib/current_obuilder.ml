@@ -33,7 +33,7 @@ module Raw = struct
         `Assoc
           [
             ( "spec",
-              `String (Obuilder_spec.sexp_of_t t.spec |> Sexplib0.Sexp.to_string)
+              `String (Obuilder_spec.sexp_of_t t.spec |> Sexplib0.Sexp.to_string_hum)
             );
             ("source", source_to_json t.source);
           ]
@@ -103,6 +103,7 @@ module Raw = struct
         Obuilder.Context.v ~src_dir:(Fpath.to_string dir) ~log:(job_logger job)
           ()
       in
+      Current.Job.log job "OBUILDER SPEC: %a" Obuilder_spec.pp k.spec;
       B.build builder ctx k.spec >>= function
       | Error `Cancelled -> Lwt.return (Error (`Msg "Cancelled"))
       | Error (`Msg _) as e -> Lwt.return e
@@ -132,13 +133,13 @@ let build ?level ?schedule ?label ?pool spec builder src =
   |> let> commit = get_build_context src and> spec = spec in
      Raw.build ?pool ?level ?schedule builder spec commit
 
-let run ?level ?schedule ?label ?pool builder ~snapshot ~cmd =
+let run ?level ?schedule ?label ?pool builder ?(rom=[]) ~snapshot cmd =
   let open Current.Syntax in
   Current.component "run%a" pp_sp_label label
   |> let> (snapshot : Raw.Build.Value.t) = snapshot in
      let spec = snapshot.ctx.spec in
      let spec =
        Obuilder_spec.stage ~child_builds:spec.child_builds ~from:spec.from
-         (spec.ops @ [ Obuilder_spec.run "%s" cmd ])
+         (spec.ops @ [ Obuilder_spec.run ~rom "%s" cmd ])
      in
      Raw.build ?pool ?level ?schedule builder spec snapshot.ctx.source
