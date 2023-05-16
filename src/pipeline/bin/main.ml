@@ -55,8 +55,10 @@ let pipeline ?auth token config builder engine_config slack =
   in
   let pipeline () =
     let commit = Evaluations.Repos.evaluations token in
-    let spec = Current.return Evaluations.Python.spec in
-    let img = Current_obuilder.build ~label:"tmf" spec builder (`Git commit) in
+    let img =
+      Current_obuilder.build ~label:"tmf" Evaluations.Python.spec builder
+        (`Git commit)
+    in
     let others =
       List.map
         (fun project_name ->
@@ -100,22 +102,6 @@ let pipeline ?auth token config builder engine_config slack =
   in
   (engine, site)
 
-(* HACK: For cloning private submodules, the deployer is given a
-   https://<user>:<token>@github.com URL to set globally... *)
-
-let init_git token_url =
-  let token_path = Fpath.v token_url in
-  assert (Bos.OS.File.exists token_path |> Result.get_ok);
-  match
-    Bos.OS.Cmd.run
-      Bos.Cmd.(v "git" % "config" % "--global" % "credential.helper" % "store")
-  with
-  | Error (`Msg m) -> failwith m
-  | Ok () ->
-      let home = Sys.getenv "HOME" in
-      let path = Fpath.(v home / ".git-credentials") in
-      Bos.OS.File.write path (Bos.OS.File.read token_path |> Result.get_ok)
-
 let token_url =
   Arg.required
   @@ Arg.opt Arg.(some string) None
@@ -135,33 +121,29 @@ let cmd =
   let doc = "Deployer for 4C sites and projects" in
   let main () config auth (store : Obuilder.Store_spec.store Lwt.t) sandbox
       engine_config mode token slack =
-    match init_git token with
+    Logs.info (fun f -> f "Successfully set credentials");
+    let builder =
+      let open Lwt.Infix in
+      store >>= fun (Store ((module Store), store)) ->
+      Obuilder.Sandbox.create ~state_dir:"obuilder-state" sandbox
+      >>= fun sandbox ->
+      let module Builder =
+        Obuilder.Builder (Store) (Obuilder.Sandbox) (Obuilder.Docker)
+      in
+      Lwt.return
+      @@ Current_obuilder.Builder ((module Builder), Builder.v ~store ~sandbox)
+    in
+    let builder = Lwt_main.run builder in
+    let engine, site =
+      pipeline ?auth token config builder engine_config slack
+    in
+    match
+      Lwt_main.run
+        (Lwt.choose
+           [ Current.Engine.thread engine; Current_web.run ~mode site ])
+    with
+    | Ok s -> print_endline s
     | Error (`Msg m) -> failwith m
-    | Ok () -> (
-        Logs.info (fun f -> f "Successfully set credentials");
-        let builder =
-          let open Lwt.Infix in
-          store >>= fun (Store ((module Store), store)) ->
-          Obuilder.Sandbox.create ~state_dir:"obuilder-state" sandbox
-          >>= fun sandbox ->
-          let module Builder =
-            Obuilder.Builder (Store) (Obuilder.Sandbox) (Obuilder.Docker)
-          in
-          Lwt.return
-          @@ Current_obuilder.Builder
-               ((module Builder), Builder.v ~store ~sandbox)
-        in
-        let builder = Lwt_main.run builder in
-        let engine, site =
-          pipeline ?auth token config builder engine_config slack
-        in
-        match
-          Lwt_main.run
-            (Lwt.choose
-               [ Current.Engine.thread engine; Current_web.run ~mode site ])
-        with
-        | Ok s -> print_endline s
-        | Error (`Msg m) -> failwith m)
   in
   Cmd.v
     (Cmd.info "tmf-pipeline" ~doc)

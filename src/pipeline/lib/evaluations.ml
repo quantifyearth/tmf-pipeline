@@ -24,9 +24,9 @@ end
 module Repos = struct
   let schedule = Current_cache.Schedule.v ~valid_for:(Duration.of_day 7) ()
 
-  let evaluations token =
-    Git.clone ~credentials:(`Token token) ~gref:"main" ~schedule
-      "https://github.com/carboncredits/tmf-implementation"
+  let evaluations _token =
+    Git.clone ~gref:"main" ~schedule
+      "git@github.com:carboncredits/tmf-implementation.git"
 end
 
 (* Generating the configuration file, we can then use this to cache

@@ -18,6 +18,11 @@ module Raw = struct
         source : [ `No_context | `Git of Current_git.Commit.t ];
       }
 
+      let source_hash = function
+        | `No_context -> `Null
+        | `Git commit ->
+            `Assoc [ ("git", `String (Current_git.Commit.hash commit)) ]
+
       let source_to_json = function
         | `No_context -> `Null
         | `Git commit ->
@@ -29,28 +34,25 @@ module Raw = struct
             `Git (Current_git.Commit.unmarshal git)
         | _ -> failwith "Unknown context for obuilder"
 
-      let to_json t =
+      let to_json ~source t =
+        let spec = Obuilder_spec.sexp_of_t t.spec |> Sexplib.Sexp.to_string in
         `Assoc
           [
-            ( "spec",
-              `String
-                (Obuilder_spec.sexp_of_t t.spec |> Sexplib0.Sexp.to_string_hum)
-            );
-            ("source", source_to_json t.source);
+            ("spec", `String spec);
+            ("spec_digest", `String (Digest.string spec |> Digest.to_hex));
+            ("source", source t.source);
           ]
 
-      let of_json v =
-        match Yojson.Safe.from_string v with
-        | `Assoc [ ("spec", `String spec); ("source", v) ] ->
-            let spec =
-              Sexplib.Conv.sexp_of_string spec |> Obuilder_spec.t_of_sexp
-            in
+      let of_json = function
+        | `Assoc [ ("spec", `String spec); ("spec_digest", _); ("source", v) ]
+          ->
+            let spec = Sexplib.Sexp.of_string spec |> Obuilder_spec.t_of_sexp in
             let source = source_of_json v in
             { spec; source }
         | _ -> failwith "Failed to unmarshal "
 
-      let digest t = Yojson.Safe.to_string (to_json t)
-      let pp f t = Yojson.Safe.pretty_print f (to_json t)
+      let digest t = Yojson.Safe.to_string (to_json ~source:source_hash t)
+      let pp f t = Yojson.Safe.pretty_print f (to_json ~source:source_hash t)
     end
 
     module Value = struct
@@ -60,13 +62,13 @@ module Raw = struct
         `Assoc
           [
             ("snapshot", `String t.snapshot);
-            ("input", `String (Key.digest t.ctx));
+            ("input", Key.to_json ~source:Key.source_to_json t.ctx);
           ]
         |> Yojson.Safe.to_string
 
       let unmarshal s =
         match Yojson.Safe.from_string s with
-        | `Assoc [ ("snapshot", `String snapshot); ("input", `String s) ] ->
+        | `Assoc [ ("snapshot", `String snapshot); ("input", s) ] ->
             let ctx = Key.of_json s in
             { snapshot; ctx }
         | _ -> failwith "Failed to unmarshal obuilder output"
@@ -104,7 +106,9 @@ module Raw = struct
         Obuilder.Context.v ~src_dir:(Fpath.to_string dir) ~log:(job_logger job)
           ()
       in
-      Current.Job.log job "OBUILDER SPEC: %a" Obuilder_spec.pp k.spec;
+      Current.Job.log job "Obuilder spec(%s): %a"
+        (Digest.to_hex @@ Digest.string @@ Key.digest k)
+        Obuilder_spec.pp k.spec;
       B.build builder ctx k.spec >>= function
       | Error `Cancelled -> Lwt.return (Error (`Msg "Cancelled"))
       | Error (`Msg _) as e -> Lwt.return e
@@ -131,7 +135,7 @@ let get_build_context = function
 let build ?level ?schedule ?label ?pool spec builder src =
   let open Current.Syntax in
   Current.component "build%a" pp_sp_label label
-  |> let> commit = get_build_context src and> spec = spec in
+  |> let> commit = get_build_context src in
      Raw.build ?pool ?level ?schedule builder spec commit
 
 let run ?level ?schedule ?label ?pool builder ?(rom = []) ~snapshot cmd =
