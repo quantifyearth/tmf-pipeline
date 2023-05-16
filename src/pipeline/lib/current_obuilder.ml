@@ -33,7 +33,8 @@ module Raw = struct
         `Assoc
           [
             ( "spec",
-              `String (Obuilder_spec.sexp_of_t t.spec |> Sexplib0.Sexp.to_string_hum)
+              `String
+                (Obuilder_spec.sexp_of_t t.spec |> Sexplib0.Sexp.to_string_hum)
             );
             ("source", source_to_json t.source);
           ]
@@ -133,7 +134,7 @@ let build ?level ?schedule ?label ?pool spec builder src =
   |> let> commit = get_build_context src and> spec = spec in
      Raw.build ?pool ?level ?schedule builder spec commit
 
-let run ?level ?schedule ?label ?pool builder ?(rom=[]) ~snapshot cmd =
+let run ?level ?schedule ?label ?pool builder ?(rom = []) ~snapshot cmd =
   let open Current.Syntax in
   Current.component "run%a" pp_sp_label label
   |> let> (snapshot : Raw.Build.Value.t) = snapshot

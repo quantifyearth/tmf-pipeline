@@ -13,7 +13,8 @@ type t = {
 let or_fail label x =
   match x with
   | Sqlite3.Rc.OK -> ()
-  | err -> Fmt.failwith "Sqlite344 %s error: %s" label (Sqlite3.Rc.to_string err)
+  | err ->
+      Fmt.failwith "Sqlite344 %s error: %s" label (Sqlite3.Rc.to_string err)
 
 let db =
   lazy

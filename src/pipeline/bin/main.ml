@@ -56,9 +56,7 @@ let pipeline ?auth token config builder engine_config slack =
   let pipeline () =
     let commit = Evaluations.Repos.evaluations token in
     let spec = Current.return Evaluations.Python.spec in
-    let img =
-      Current_obuilder.build ~label:"tmf" spec builder (`Git commit)
-    in
+    let img = Current_obuilder.build ~label:"tmf" spec builder (`Git commit) in
     let others =
       List.map
         (fun project_name ->
@@ -135,7 +133,8 @@ let store = Obuilder.Store_spec.cmdliner
 
 let cmd =
   let doc = "Deployer for 4C sites and projects" in
-  let main () config auth (store : Obuilder.Store_spec.store Lwt.t) sandbox engine_config mode token slack =
+  let main () config auth (store : Obuilder.Store_spec.store Lwt.t) sandbox
+      engine_config mode token slack =
     match init_git token with
     | Error (`Msg m) -> failwith m
     | Ok () -> (
@@ -153,7 +152,9 @@ let cmd =
                ((module Builder), Builder.v ~store ~sandbox)
         in
         let builder = Lwt_main.run builder in
-        let engine, site = pipeline ?auth token config builder engine_config slack in
+        let engine, site =
+          pipeline ?auth token config builder engine_config slack
+        in
         match
           Lwt_main.run
             (Lwt.choose
