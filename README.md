@@ -20,3 +20,19 @@ You can then run the pipeline with:
 dune exec -- ./src/bin/main.exe --github-token-file=.token --slack .slack --store=zfs:obuilder-zfs
 ```
 
+## Debugging and inspecting
+
+The pipeline can be interfaced via the command line, and you can checkout a specific build.
+You can have a [hoke](https://www.lrb.co.uk/the-paper/v06/n20/seamus-heaney/two-poems) around
+to try and see what went wrong.
+
+```
+hoke -c path/to/file.cap list
+```
+
+This will show you all of the different builds and their tags along with a unique identifier along with
+whether the succeeded or failed. 
+
+```
+hoke -c path/to/file.cap checkout <unique-id>
+```

@@ -1,0 +1,5 @@
+(executable
+ (name main)
+ (package tmf-pipeline)
+ (public_name hoke)
+ (libraries obuilder))

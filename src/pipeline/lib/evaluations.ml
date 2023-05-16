@@ -1,6 +1,6 @@
 (* Very niche ocurrent plugins for working directly
    with the 4C evaluations repository *)
-
+open Current.Syntax
 module Git = Current_git
 module Github = Current_github
 module Current_obuilder = Current_obuilder
@@ -24,29 +24,40 @@ end
 module Repos = struct
   let schedule = Current_cache.Schedule.v ~valid_for:(Duration.of_day 7) ()
 
-  let evaluations user =
-    Git.clone ~credentials:(`User user) ~schedule ~gref:"pf341-automate"
-      "https://github.com/carboncredits/4C_evaluations"
+  let evaluations token =
+    Git.clone ~credentials:(`Token token) ~gref:"main" ~schedule "https://github.com/carboncredits/tmf-implementation"
 end
 
 (* Generating the configuration file, we can then use this to cache
    each individual step in the pipeline *)
-module Config = struct
+module Setup = struct
   let generate ~project_name img =
     Python.run
-      ~label:("config " ^ String.lowercase_ascii project_name)
-      ~script_path:"eval.py" ~args:[ "config"; project_name ] img
+      ~label:("setup " ^ String.lowercase_ascii project_name)
+      ~script_path:"main.py" ~args:[] img
 end
+
+let merge_builds a b =
+  let* a and* _ = b in
+  Current.return a
 
 let evaluate ~project_name ~builder img =
   let python_run = Python.run ~builder in
-  Config.generate ~project_name ~builder img
-  |> python_run
-       ~label:("polygons " ^ String.lowercase_ascii project_name)
-       ~args:[ "-c"; "print('HAHAHA todo...')" ]
-  |> python_run
-       ~label:("points " ^ String.lowercase_ascii project_name)
-       ~args:[ "-c"; "print('HAHAHA todo...')" ]
-  |> python_run
-       ~label:("landcover " ^ String.lowercase_ascii project_name)
-       ~args:[ "-c"; "print('HAHAHA todo...')" ]
+  let setup = Setup.generate ~project_name ~builder img in
+  let additionality =
+    python_run
+       ~label:("additionality " ^ String.lowercase_ascii project_name)
+       ~args:[ "-c"; "print('HAHAHA todo...')" ] setup
+  in
+  let leakage =
+    python_run
+       ~label:("leakage " ^ String.lowercase_ascii project_name)
+       ~args:[ "-c"; "print('HAHAHA todo...')" ] setup
+  in
+  let permanence =
+    python_run
+        ~label:("additionality " ^ String.lowercase_ascii project_name)
+        ~args:[ "-c"; "print('HAHAHA todo...')" ] (merge_builds additionality leakage)
+  in
+  permanence
+

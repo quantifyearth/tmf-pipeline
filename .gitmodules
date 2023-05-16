@@ -1,3 +1,6 @@
 [submodule "vendor/ocurrent"]
 	path = vendor/ocurrent
 	url = https://github.com/patricoferris/ocurrent
+[submodule "vendor/obuilder"]
+	path = vendor/obuilder
+	url = https://github.com/patricoferris/obuilder

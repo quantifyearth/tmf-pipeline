@@ -1,6 +1,6 @@
 open Cmdliner
 
-let uri = Uri.of_string "https://deployer.quantify.earth"
+let uri = Uri.of_string "https://pipeline.quantify.earth"
 
 (* [has_role] is provided to the web frontend to allow it to dynamically
    decide based on the user and the role whether they are permitted that
@@ -39,7 +39,7 @@ let read_channel_uri path =
 
 module Current_obuilder = Evaluations.Current_obuilder
 
-let pipeline ?auth config builder engine_config slack =
+let pipeline ?auth token config builder engine_config slack =
   let _channel = Some (read_channel_uri slack) in
   let _web_ui =
     let base = uri in
@@ -54,10 +54,10 @@ let pipeline ?auth config builder engine_config slack =
       ([], []) config.Config.projects
   in
   let pipeline () =
-    let commit = Evaluations.Repos.evaluations "pf341" in
+    let commit = Evaluations.Repos.evaluations token in
     let spec = Current.return Evaluations.Python.spec in
     let img =
-      Current_obuilder.build ~label:"4C_evaluations" spec builder (`Git commit)
+      Current_obuilder.build ~label:"tmf" spec builder (`Git commit)
     in
     let others =
       List.map
@@ -119,7 +119,7 @@ let init_git token_url =
       Bos.OS.File.write path (Bos.OS.File.read token_path |> Result.get_ok)
 
 let token_url =
-  Arg.value
+  Arg.required
   @@ Arg.opt Arg.(some string) None
   @@ Arg.info ~doc:"A github <user>:<token> URL" ~docv:"GITHUB_TOKEN_FILE"
        [ "github-token-file" ]
@@ -131,23 +131,18 @@ let slack =
        ~doc:"A file containing the URI of the endpoint for status updates."
        ~docv:"URI-FILE" [ "slack" ]
 
-let store =
-  let store = Obuilder.Store_spec.store_t in
-  Arg.required
-  @@ Arg.opt Arg.(some store) None
-  @@ Arg.info ~doc:"OBuilder store" [ "store" ]
+let store = Obuilder.Store_spec.cmdliner
 
 let cmd =
   let doc = "Deployer for 4C sites and projects" in
-  let main () config auth store sandbox engine_config mode token_url slack =
-    match Option.map init_git token_url with
-    | Some (Error (`Msg m)) -> failwith m
-    | Some (Ok ()) | None -> (
+  let main () config auth (store : Obuilder.Store_spec.store Lwt.t) sandbox engine_config mode token slack =
+    match init_git token with
+    | Error (`Msg m) -> failwith m
+    | Ok () -> (
         Logs.info (fun f -> f "Successfully set credentials");
         let builder =
           let open Lwt.Infix in
-          Obuilder.Store_spec.to_store Obuilder.Rsync_store.Hardlink store
-          >>= fun (Store ((module Store), store)) ->
+          store >>= fun (Store ((module Store), store)) ->
           Obuilder.Sandbox.create ~state_dir:"obuilder-state" sandbox
           >>= fun sandbox ->
           let module Builder =
@@ -158,7 +153,7 @@ let cmd =
                ((module Builder), Builder.v ~store ~sandbox)
         in
         let builder = Lwt_main.run builder in
-        let engine, site = pipeline ?auth config builder engine_config slack in
+        let engine, site = pipeline ?auth token config builder engine_config slack in
         match
           Lwt_main.run
             (Lwt.choose
@@ -168,7 +163,7 @@ let cmd =
         | Error (`Msg m) -> failwith m)
   in
   Cmd.v
-    (Cmd.info "4c-evaluations" ~doc)
+    (Cmd.info "tmf-pipeline" ~doc)
     Term.(
       const main $ Common.setup_log $ Config.cmdliner
       $ Current_github.Auth.cmdliner $ store $ Obuilder.Sandbox.cmdliner

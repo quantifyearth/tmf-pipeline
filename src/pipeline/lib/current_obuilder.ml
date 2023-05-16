@@ -82,7 +82,7 @@ module Raw = struct
           Current.Process.exec ~cwd:dir ~cancellable:true ~job
             ("", [| "rsync"; "-aHq"; Fpath.to_string path ^ "/"; "." |])
           >>= fun () -> fn dir
-      | `Git commit -> Current_git.with_checkout ~user:"pf341" ~job commit fn
+      | `Git commit -> Current_git.with_checkout ~job commit fn
 
     let job_logger job tag msg =
       match tag with
