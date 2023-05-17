@@ -93,8 +93,7 @@ let evaluate ~project_name ~store ~builder img =
       ~pre_run:
         [
           Obuilder_spec.run "echo '%s' > /data/arkdir.json"
-            (Arkdir.to_string arkdir);
-          Obuilder_spec.run "cat /data/arkdir.json";
+            (Arkdir.to_string arkdir)
         ]
       img
   in
