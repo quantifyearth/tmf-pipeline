@@ -39,7 +39,7 @@ let read_channel_uri path =
 
 module Current_obuilder = Evaluations.Current_obuilder
 
-let pipeline ?auth token config builder engine_config slack =
+let pipeline ?auth token config store builder engine_config slack =
   let _channel = Some (read_channel_uri slack) in
   let _web_ui =
     let base = uri in
@@ -63,14 +63,14 @@ let pipeline ?auth token config builder engine_config slack =
       List.map
         (fun project_name ->
           Current.ignore_value
-          @@ Evaluations.evaluate ~project_name ~builder img)
+          @@ Evaluations.evaluate ~project_name ~store ~builder img)
         others
     in
     let wlts =
       List.map
         (fun project_name ->
           Current.ignore_value
-          @@ Evaluations.evaluate ~project_name ~builder img)
+          @@ Evaluations.evaluate ~project_name ~store ~builder img)
         wlts
     in
     let wlts =
@@ -122,20 +122,22 @@ let cmd =
   let main () config auth (store : Obuilder.Store_spec.store Lwt.t) sandbox
       engine_config mode token slack =
     Logs.info (fun f -> f "Successfully set credentials");
+    let open Lwt.Infix in
     let builder =
-      let open Lwt.Infix in
-      store >>= fun (Store ((module Store), store)) ->
+      store >>= fun (Store ((module Store), store_v) as store) ->
       Obuilder.Sandbox.create ~state_dir:"obuilder-state" sandbox
       >>= fun sandbox ->
       let module Builder =
         Obuilder.Builder (Store) (Obuilder.Sandbox) (Obuilder.Docker)
       in
       Lwt.return
-      @@ Current_obuilder.Builder ((module Builder), Builder.v ~store ~sandbox)
+      @@ ( store,
+           Current_obuilder.Builder
+             ((module Builder), Builder.v ~store:store_v ~sandbox) )
     in
-    let builder = Lwt_main.run builder in
+    let store, builder = Lwt_main.run builder in
     let engine, site =
-      pipeline ?auth token config builder engine_config slack
+      pipeline ?auth token config store builder engine_config slack
     in
     match
       Lwt_main.run

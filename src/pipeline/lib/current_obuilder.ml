@@ -3,6 +3,10 @@ module Git = Current_git
 type builder =
   | Builder : (module Obuilder.BUILDER with type t = 'a) * 'a -> builder
 
+type store = Obuilder.Store_spec.store
+
+let ( / ) = Filename.concat
+
 module Raw = struct
   module Build = struct
     type t = {
@@ -58,20 +62,22 @@ module Raw = struct
     module Value = struct
       type t = { ctx : Key.t; snapshot : string }
 
-      let marshal t =
+      let to_yojson t =
         `Assoc
           [
             ("snapshot", `String t.snapshot);
             ("input", Key.to_json ~source:Key.source_to_json t.ctx);
           ]
-        |> Yojson.Safe.to_string
 
-      let unmarshal s =
-        match Yojson.Safe.from_string s with
+      let marshal t = to_yojson t |> Yojson.Safe.to_string
+
+      let of_yojson = function
         | `Assoc [ ("snapshot", `String snapshot); ("input", s) ] ->
             let ctx = Key.of_json s in
-            { snapshot; ctx }
-        | _ -> failwith "Failed to unmarshal obuilder output"
+            Ok { snapshot; ctx }
+        | _ -> Error "Failed to unmarshal obuilder output"
+
+      let unmarshal s = Yojson.Safe.from_string s |> of_yojson |> Result.get_ok
     end
 
     let id = "obuilder-build"
@@ -124,6 +130,64 @@ module Raw = struct
     let key = Build.Key.{ spec; source } in
     let ctx = Build.{ pool; timeout; level; builder } in
     BuildC.get ?schedule ctx key
+
+  module Read = struct
+    type t = {
+      pool : unit Current.Pool.t option;
+      timeout : Duration.t option;
+      level : Current.Level.t option;
+      store : store;
+    }
+
+    module Key = struct
+      type t = { id : Build.Value.t; files : string list } [@@deriving yojson]
+
+      let digest t = to_yojson t |> Yojson.Safe.to_string
+      let pp f t = Yojson.Safe.pretty_print f (to_yojson t)
+    end
+
+    module Value = struct
+      type t = { id : string; files : (string * string option) list }
+      [@@deriving yojson]
+
+      let marshal t = to_yojson t |> Yojson.Safe.to_string
+      let unmarshal s = Yojson.Safe.from_string s |> of_yojson |> Result.get_ok
+    end
+
+    let contents (Obuilder.Store_spec.Store ((module S), v)) ~snapshot ~path =
+      let open Lwt.Infix in
+      S.result v snapshot.Build.Value.snapshot >>= function
+      | None -> Lwt.return_none
+      | Some dir -> (
+          let path = dir / "rootfs" / path |> Fpath.v in
+          match Bos.OS.File.read path with
+          | Ok c -> Lwt.return (Some c)
+          | _ -> Lwt.return_none)
+
+    let id = "obuilder-read"
+
+    let build { store; timeout; pool; level } (job : Current.Job.t) (k : Key.t)
+        : Value.t Current.or_error Lwt.t =
+      let open Lwt.Infix in
+      let level = Option.value level ~default:Current.Level.Average in
+      Current.Job.start ?timeout ?pool job ~level >>= fun () ->
+      Lwt_list.map_p
+        (fun path -> contents store ~snapshot:k.id ~path >|= fun c -> (path, c))
+        k.files
+      >>= fun lst ->
+      let t = { id = k.id.snapshot; Value.files = lst } in
+      Lwt_result.return t
+
+    let pp = Key.pp
+    let auto_cancel = true
+  end
+
+  module ReadC = Current_cache.Make (Read)
+
+  let contents ?pool ?timeout ?level ?schedule store snapshot files =
+    let key = Read.Key.{ files; id = snapshot } in
+    let ctx = Read.{ pool; timeout; level; store } in
+    ReadC.get ?schedule ctx key
 end
 
 let pp_sp_label = Fmt.(option (sp ++ string))
@@ -138,14 +202,23 @@ let build ?level ?schedule ?label ?pool spec builder src =
   |> let> commit = get_build_context src in
      Raw.build ?pool ?level ?schedule builder spec commit
 
-let run ?level ?schedule ?label ?pool builder ?(rom = []) ~snapshot cmd =
+let run ?level ?schedule ?label ?pool builder ?(rom = []) ?env ?(pre_run = [])
+    ~snapshot cmd =
   let open Current.Syntax in
   Current.component "run%a" pp_sp_label label
-  |> let> (snapshot : Raw.Build.Value.t) = snapshot
-     and> rom = Current.list_seq rom in
+  |> let> (snapshot : Raw.Build.Value.t) = snapshot in
      let spec = snapshot.ctx.spec in
+     let env =
+       match env with Some (k, v) -> [ Obuilder_spec.env k v ] | None -> []
+     in
      let spec =
        Obuilder_spec.stage ~child_builds:spec.child_builds ~from:spec.from
-         (spec.ops @ [ Obuilder_spec.run ~rom "%s" cmd ])
+         (spec.ops @ env @ pre_run @ [ Obuilder_spec.run ~rom "%s" cmd ])
      in
      Raw.build ?pool ?level ?schedule builder spec snapshot.ctx.source
+
+let contents ?level ?schedule ?label ?pool ~snapshot store files =
+  let open Current.Syntax in
+  Current.component "read%a" pp_sp_label label
+  |> let> snapshot = snapshot in
+     Raw.contents ?pool ?level ?schedule store snapshot files
