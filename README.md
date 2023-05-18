@@ -17,7 +17,7 @@ sudo zpool create obuilder-zfs $PWD/zfs.img
 You can then run the pipeline with:
 
 ```
-dune exec -- ./src/bin/main.exe --github-token-file=.token --slack .slack --store=zfs:obuilder-zfs
+dune exec -- ./src/pipeline/bin/main.exe --github-token-file=.token --slack .slack --store=zfs:obuilder-zfs --capnp-secret-key-file=secret-key.pem
 ```
 
 ## Debugging and inspecting
@@ -27,12 +27,6 @@ You can have a [hoke](https://www.lrb.co.uk/the-paper/v06/n20/seamus-heaney/two-
 to try and see what went wrong.
 
 ```
-hoke -c path/to/file.cap list
+hoke path/to/file.cap
 ```
 
-This will show you all of the different builds and their tags along with a unique identifier along with
-whether the succeeded or failed. 
-
-```
-hoke -c path/to/file.cap checkout <unique-id>
-```

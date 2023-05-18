@@ -1,7 +1,15 @@
 (executable
  (name main)
  (public_name tmf-pipeline)
- (libraries evaluations current_web current_slack fmt.cli logs.cli fmt.tty))
+ (libraries
+  evaluations
+  current_web
+  current_slack
+  fmt.cli
+  logs.cli
+  fmt.tty
+  capnp-rpc-unix
+  current_rpc))
 
 (rule
  (target static.ml)

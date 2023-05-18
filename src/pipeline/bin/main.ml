@@ -1,4 +1,5 @@
 open Cmdliner
+module Rpc = Current_rpc.Impl (Current)
 
 let uri = Uri.of_string "https://pipeline.quantify.earth"
 
@@ -120,7 +121,7 @@ let store = Obuilder.Store_spec.cmdliner
 let cmd =
   let doc = "Deployer for 4C sites and projects" in
   let main () config auth (store : Obuilder.Store_spec.store Lwt.t) sandbox
-      engine_config mode token slack =
+      engine_config mode token slack capnp =
     Logs.info (fun f -> f "Successfully set credentials");
     let open Lwt.Infix in
     let builder =
@@ -139,11 +140,19 @@ let cmd =
     let engine, site =
       pipeline ?auth token config store builder engine_config slack
     in
-    match
-      Lwt_main.run
-        (Lwt.choose
-           [ Current.Engine.thread engine; Current_web.run ~mode site ])
-    with
+    let service_id = Capnp_rpc_unix.Vat_config.derived_id capnp "engine" in
+    let restore =
+      Capnp_rpc_net.Restorer.single service_id (Rpc.engine engine)
+    in
+    let main =
+      Capnp_rpc_unix.serve capnp ~restore >>= fun vat ->
+      let uri = Capnp_rpc_unix.Vat.sturdy_uri vat service_id in
+      let ch = open_out "engine.cap" in
+      output_string ch (Uri.to_string uri ^ "\n");
+      close_out ch;
+      Lwt.choose [ Current.Engine.thread engine; Current_web.run ~mode site ]
+    in
+    match Lwt_main.run main with
     | Ok s -> print_endline s
     | Error (`Msg m) -> failwith m
   in
@@ -152,6 +161,7 @@ let cmd =
     Term.(
       const main $ Common.setup_log $ Config.cmdliner
       $ Current_github.Auth.cmdliner $ store $ Obuilder.Sandbox.cmdliner
-      $ Current.Config.cmdliner $ Current_web.cmdliner $ token_url $ slack)
+      $ Current.Config.cmdliner $ Current_web.cmdliner $ token_url $ slack
+      $ Capnp_rpc_unix.Vat_config.cmd)
 
 let () = Cmd.(exit @@ eval cmd)
