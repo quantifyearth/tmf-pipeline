@@ -6,6 +6,7 @@ module Github = Current_github
 module Current_obuilder = Current_obuilder
 
 let arkdir = "/data"
+let wdir = "/usr/src/app"
 let ( / ) = Filename.concat
 
 module Python = struct
@@ -13,16 +14,16 @@ module Python = struct
     let open Obuilder_spec in
     stage ~from:"python:3.10-bullseye"
       [
-        workdir "/usr/src/app";
+        workdir wdir;
         copy ~from:`Context [ "requirements.txt" ] ~dst:"./";
         run ~network:[ "host" ] "pip install --no-cache-dir -r requirements.txt";
-        run "mkdir /data";
+        run "mkdir ./data";
         copy ~from:`Context [ "." ] ~dst:"./";
       ]
 
   let run ?label ?(args = []) ?script_path ?rom ?pre_run ~builder snapshot =
     Current_obuilder.run ?label builder ~snapshot ?rom ?pre_run
-      ~env:("ARKDIR", arkdir)
+      ~env:("ARKDIR", "./data")
       (String.concat " " (("python" :: Option.to_list script_path) @ args))
 end
 
@@ -52,7 +53,7 @@ let snapshots_to_rom
       Obuilder_spec.Rom.of_build ~hash:snap.snapshot ~build_dir target)
     lst
 
-let evaluate ~project_name ~store ~builder img =
+let evaluate ~project_name ~store:_ ~builder img =
   let python_run = Python.run ~builder in
   let additionality =
     python_run
@@ -67,33 +68,30 @@ let evaluate ~project_name ~store ~builder img =
       ~script_path:"main.py" ~args:[ "--method"; "leakage" ] img
   in
   let permanence =
-    let* add_dir =
-      Current_obuilder.contents ~snapshot:additionality store
-        [ arkdir / "arkdir.json" ]
-    and* leak_dir =
-      Current_obuilder.contents ~snapshot:leakage store
-        [ arkdir / "arkdir.json" ]
+    let* additionality = additionality and* leakage = leakage in
+    let add_rom =
+      Obuilder_spec.Rom.of_build ~hash:additionality.snapshot
+        ~build_dir:(wdir / "data")
+        (arkdir / additionality.snapshot)
     in
-    let add_arkdir, add_roms =
-      (add_dir.id, Arkdir.of_string (snd @@ List.hd add_dir.files |> Option.get))
-      |> Arkdir.mounts
+    let leak_rom =
+      Obuilder_spec.Rom.of_build ~hash:leakage.snapshot
+        ~build_dir:(wdir / "data")
+        (arkdir / leakage.snapshot)
     in
-    let leak_arkdir, leak_roms =
-      ( leak_dir.id,
-        Arkdir.of_string (snd @@ List.hd leak_dir.files |> Option.get) )
-      |> Arkdir.mounts
-    in
-    let arkdir, rom =
-      (Arkdir.combine add_arkdir leak_arkdir, add_roms @ leak_roms)
-    in
+    let rom = [ add_rom; leak_rom ] in
     python_run ~rom
       ~label:("permanence " ^ String.lowercase_ascii project_name)
       ~script_path:"main.py"
       ~args:[ "--method"; "permanence" ]
       ~pre_run:
         [
-          Obuilder_spec.run "echo '%s' > /data/arkdir.json"
-            (Arkdir.to_string arkdir)
+          Obuilder_spec.run ~rom "ln -s %s/* %s/data/"
+            (arkdir / additionality.snapshot)
+            wdir;
+          Obuilder_spec.run ~rom "ln -s %s/* %s/data/"
+            (arkdir / leakage.snapshot)
+            wdir;
         ]
       img
   in
