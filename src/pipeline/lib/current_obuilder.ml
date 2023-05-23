@@ -30,12 +30,13 @@ module Raw = struct
       let source_to_json = function
         | `No_context -> `Null
         | `Git commit ->
-            `Assoc [ ("git", `String (Current_git.Commit.marshal commit)) ]
+            `Assoc [ ("git", Current_git.Commit.to_yojson commit) ]
 
       let source_of_json = function
         | `Null -> `No_context
-        | `Assoc [ ("git", `String git) ] ->
-            `Git (Current_git.Commit.unmarshal git)
+        | `Assoc [ ("git", git) ] ->
+             let git = Current_git.Commit.of_yojson git |> Result.get_ok in
+            `Git git
         | _ -> failwith "Unknown context for obuilder"
 
       let to_json ~source t =
@@ -202,18 +203,39 @@ let build ?level ?schedule ?label ?pool spec builder src =
   |> let> commit = get_build_context src in
      Raw.build ?pool ?level ?schedule builder spec commit
 
-let run ?level ?schedule ?label ?pool builder ?(rom = []) ?env ?(pre_run = [])
+let run ?level ?schedule ?label ?pool builder
+    ?(rom : (string * string * Raw.Build.Value.t) list Current.t option) ?env
     ~snapshot cmd =
   let open Current.Syntax in
   Current.component "run%a" pp_sp_label label
-  |> let> (snapshot : Raw.Build.Value.t) = snapshot in
+  |> let> (snapshot : Raw.Build.Value.t) = snapshot
+     and> rom = Current.option_seq rom in
      let spec = snapshot.ctx.spec in
      let env =
        match env with Some (k, v) -> [ Obuilder_spec.env k v ] | None -> []
      in
+     let rom, symlinks =
+       match rom with
+       | None -> ([], [])
+       | Some vs ->
+           let roms =
+             List.map
+               (fun (build_dir, _, snap) ->
+                 Obuilder_spec.Rom.of_build ~hash:snap.Raw.Build.Value.snapshot
+                   ~build_dir ("/data" / snap.snapshot))
+               vs
+           in
+           ( roms,
+             List.map2
+               (fun (_, wdir, snap) rom ->
+                 Obuilder_spec.run ~rom:[ rom ] "ln -s %s/* %s/data/"
+                   ("/data" / snap.Raw.Build.Value.snapshot)
+                   wdir)
+               vs roms )
+     in
      let spec =
        Obuilder_spec.stage ~child_builds:spec.child_builds ~from:spec.from
-         (spec.ops @ env @ pre_run @ [ Obuilder_spec.run ~rom "%s" cmd ])
+         (spec.ops @ env @ symlinks @ [ Obuilder_spec.run ~rom "%s" cmd ])
      in
      Raw.build ?pool ?level ?schedule builder spec snapshot.ctx.source
 

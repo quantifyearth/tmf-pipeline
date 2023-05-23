@@ -9,13 +9,22 @@ let engine url : Current_rpc.Engine.t Lwt.t =
 open Nottui
 module W = Nottui_widgets
 
-type job = { status : Current_rpc.Job.status; selected : bool; expanded : bool }
+type job = {
+  job : Current_rpc.Job.t;
+  status : Current_rpc.Job.status;
+  selected : bool;
+  expanded : bool;
+  log : string option;
+}
 
 module JobTable = struct
   type t = {
     table : job Lwd_table.t;
     mutable selected : job Lwd_table.row option;
   }
+
+  let selected t =
+    match t.selected with None -> None | Some row -> Lwd_table.get row
 
   let create () = { table = Lwd_table.make (); selected = None }
 
@@ -66,13 +75,38 @@ module JobTable = struct
             Lwd_table.set row { job with selected = false };
             Lwd_table.set row' { job' with selected = true })
 
+  let set_log job_row =
+    match Lwd_table.get job_row with
+    | None -> ()
+    | Some job ->
+        let buf = Buffer.create 128 in
+        let rec aux start =
+          Current_rpc.Job.log ~start job.job >>= function
+          | Error _ as e -> Lwt.return e
+          | Ok (data, next) ->
+              if data = "" then Lwt_result.return ()
+              else (
+                Buffer.add_string buf data;
+                aux next)
+        in
+        Lwt.async (fun () ->
+            aux 0L >|= function
+            | Ok () ->
+                Lwd_table.set job_row
+                  { job with log = Some (Buffer.contents buf); expanded = true }
+            | _ ->
+                Lwd_table.set job_row
+                  { job with log = Some "Failed to get log"; expanded = true })
+
   let toggle_selected t =
     match t.selected with
     | None -> ()
     | Some r -> (
         match Lwd_table.get r with
         | None -> ()
-        | Some v -> Lwd_table.set r { v with expanded = not v.expanded })
+        | Some v ->
+            if (not v.expanded) && v.log = None then set_log r
+            else Lwd_table.set r { v with expanded = not v.expanded })
 end
 
 let job_ui (job : job) =
@@ -80,16 +114,33 @@ let job_ui (job : job) =
     Notty.A.(
       fg green ++ if job.selected then Notty.A.(bg white) else Notty.A.empty)
   in
+  let arrow = if job.expanded then "▼ " else "▶ " in
   let base =
     if job.expanded then
-      [ W.fmt ~attr:Notty.A.(st italic) "%s" job.status.description ]
-    else []
+      [
+        W.fmt ~attr "%s%s" arrow job.status.id;
+        W.fmt ~attr:Notty.A.(st italic) "%s" job.status.description;
+      ]
+    else [ W.fmt ~attr "%s%s" arrow job.status.id ]
   in
-  let arrow = if job.expanded then "▼ " else "▶ " in
-  Ui.vcat (W.fmt ~attr "%s%s" arrow job.status.id :: base)
+  Ui.vcat base
+
+let job_view (job : job) =
+  let attr = Notty.A.(fg green ++ st italic) in
+  let base =
+    [
+      W.fmt ~attr "%s" job.status.id;
+      W.fmt ~attr:Notty.A.(st italic) "%s" job.status.description;
+    ]
+    @ match job.log with Some log -> [ W.fmt "%s" log ] | None -> []
+  in
+  W.scroll_area @@ Lwd.return @@ Ui.vcat base
+
+type screen = [ `Main | `Job of job ]
 
 let ui engine =
   let quit, resolve_quit = Lwt.wait () in
+  let screen : screen Lwd.var = Lwd.var `Main in
   let jobs : JobTable.t = JobTable.create () in
   let lst =
     Lwd_table.map_reduce
@@ -102,12 +153,20 @@ let ui engine =
         | Ok h ->
             let js = List.map (Current_rpc.Engine.job engine) h in
             Lwt_list.map_p
-              (fun j -> Current_rpc.Job.status j >|= Result.get_ok)
+              (fun j ->
+                Current_rpc.Job.status j >|= Result.get_ok >|= fun v -> (v, j))
               js
             >>= fun js ->
             let js =
               List.map
-                (fun status -> { status; selected = false; expanded = false })
+                (fun (status, job) ->
+                  {
+                    job;
+                    status;
+                    selected = false;
+                    expanded = false;
+                    log = None;
+                  })
                 js
             in
             JobTable.update jobs js;
@@ -124,6 +183,12 @@ let ui engine =
         | `Arrow `Down, [] ->
             JobTable.select jobs `Down;
             `Handled
+        | `ASCII 'e', [] -> (
+            match JobTable.selected jobs with
+            | Some job ->
+                Lwd.set screen (`Job job);
+                `Handled
+            | None -> `Handled)
         | `Enter, [] ->
             JobTable.toggle_selected jobs;
             `Handled
@@ -133,5 +198,12 @@ let ui engine =
         | _ -> `Unhandled)
       ui
   in
-  let ui = W.window_manager_view (W.window_manager lst) in
+  let ui =
+    let view =
+      Lwd.bind (Lwd.get screen) ~f:(function
+        | `Main -> lst
+        | `Job job -> job_view job)
+    in
+    W.window_manager_view (W.window_manager view)
+  in
   Nottui_lwt.run ~quit (Lwd.map ~f:keys ui)

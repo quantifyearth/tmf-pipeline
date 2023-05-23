@@ -21,9 +21,8 @@ module Python = struct
         copy ~from:`Context [ "." ] ~dst:"./";
       ]
 
-  let run ?label ?(args = []) ?script_path ?rom ?pre_run ~builder snapshot =
-    Current_obuilder.run ?label builder ~snapshot ?rom ?pre_run
-      ~env:("ARKDIR", "./data")
+  let run ?label ?(args = []) ?script_path ?rom ~builder snapshot =
+    Current_obuilder.run ?label builder ~snapshot ?rom
       (String.concat " " (("python" :: Option.to_list script_path) @ args))
 end
 
@@ -68,31 +67,17 @@ let evaluate ~project_name ~store:_ ~builder img =
       ~script_path:"main.py" ~args:[ "--method"; "leakage" ] img
   in
   let permanence =
-    let* additionality = additionality and* leakage = leakage in
-    let add_rom =
-      Obuilder_spec.Rom.of_build ~hash:additionality.snapshot
-        ~build_dir:(wdir / "data")
-        (arkdir / additionality.snapshot)
+    let rom =
+      Current.list_seq
+        [
+          Current.map (fun v -> (wdir / "data", wdir, v)) additionality;
+          Current.map (fun v -> (wdir / "data", wdir, v)) leakage;
+        ]
     in
-    let leak_rom =
-      Obuilder_spec.Rom.of_build ~hash:leakage.snapshot
-        ~build_dir:(wdir / "data")
-        (arkdir / leakage.snapshot)
-    in
-    let rom = [ add_rom; leak_rom ] in
     python_run ~rom
       ~label:("permanence " ^ String.lowercase_ascii project_name)
       ~script_path:"main.py"
       ~args:[ "--method"; "permanence" ]
-      ~pre_run:
-        [
-          Obuilder_spec.run ~rom "ln -s %s/* %s/data/"
-            (arkdir / additionality.snapshot)
-            wdir;
-          Obuilder_spec.run ~rom "ln -s %s/* %s/data/"
-            (arkdir / leakage.snapshot)
-            wdir;
-        ]
       img
   in
   permanence
