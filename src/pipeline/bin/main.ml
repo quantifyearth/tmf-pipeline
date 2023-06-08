@@ -1,4 +1,5 @@
 open Cmdliner
+module Rpc = Current_rpc.Impl (Current)
 
 let uri = Uri.of_string "https://pipeline.quantify.earth"
 
@@ -39,7 +40,7 @@ let read_channel_uri path =
 
 module Current_obuilder = Evaluations.Current_obuilder
 
-let pipeline ?auth token config store builder engine_config slack =
+let pipeline ?auth token config _store builder engine_config slack =
   let _channel = Some (read_channel_uri slack) in
   let _web_ui =
     let base = uri in
@@ -55,22 +56,22 @@ let pipeline ?auth token config store builder engine_config slack =
   in
   let pipeline () =
     let commit = Evaluations.Repos.evaluations token in
+    let data = Evaluations.Repos.data token in
+    let scc_values =
+      (Evaluations.Git_file.contents data [ Fpath.(v "scc.csv") ]) 
+    in
     let img =
       Current_obuilder.build ~label:"tmf" Evaluations.Python.spec builder
         (`Git commit)
     in
     let others =
       List.map
-        (fun project_name ->
-          Current.ignore_value
-          @@ Evaluations.evaluate ~project_name ~store ~builder img)
+        (fun project_name -> Evaluations.evaluate ~scc_values ~project_name ~builder img)
         others
     in
     let wlts =
       List.map
-        (fun project_name ->
-          Current.ignore_value
-          @@ Evaluations.evaluate ~project_name ~store ~builder img)
+        (fun project_name -> Evaluations.evaluate ~scc_values ~project_name ~builder img)
         wlts
     in
     let wlts =
@@ -86,16 +87,11 @@ let pipeline ?auth token config store builder engine_config slack =
   let engine = Current.Engine.create ~config:engine_config pipeline in
   (* Extra routes (in addtion to the Engine's) for authentication and webhooks. *)
   let routes =
-    Web.static_routes custom_css
+    Web.static_routes ~engine builder custom_css
     @ [
         Routes.((s "login" /? nil) @--> Current_github.Auth.login auth)
-        (* Routes.(
-           (s "webhooks" / s "github" /? nil)
-           @--> Current_github.webhook ~engine ~webhook_secret
-                  ~get_job_ids:Index.get_job_ids); *);
       ]
   in
-  (* let authn = Current_github.Auth.make_login_uri (Option.get auth) in *)
   let site =
     Current_web.Site.v ~custom_css ~has_role ~name:"4c-evaluations"
       (routes @ Current_web.routes engine)
@@ -120,7 +116,7 @@ let store = Obuilder.Store_spec.cmdliner
 let cmd =
   let doc = "Deployer for 4C sites and projects" in
   let main () config auth (store : Obuilder.Store_spec.store Lwt.t) sandbox
-      engine_config mode token slack =
+      engine_config mode token slack capnp =
     Logs.info (fun f -> f "Successfully set credentials");
     let open Lwt.Infix in
     let builder =
@@ -139,11 +135,19 @@ let cmd =
     let engine, site =
       pipeline ?auth token config store builder engine_config slack
     in
-    match
-      Lwt_main.run
-        (Lwt.choose
-           [ Current.Engine.thread engine; Current_web.run ~mode site ])
-    with
+    let service_id = Capnp_rpc_unix.Vat_config.derived_id capnp "engine" in
+    let restore =
+      Capnp_rpc_net.Restorer.single service_id (Rpc.engine engine)
+    in
+    let main =
+      Capnp_rpc_unix.serve capnp ~restore >>= fun vat ->
+      let uri = Capnp_rpc_unix.Vat.sturdy_uri vat service_id in
+      let ch = open_out "engine.cap" in
+      output_string ch (Uri.to_string uri ^ "\n");
+      close_out ch;
+      Lwt.choose [ Current.Engine.thread engine; Current_web.run ~mode site ]
+    in
+    match Lwt_main.run main with
     | Ok s -> print_endline s
     | Error (`Msg m) -> failwith m
   in
@@ -152,6 +156,7 @@ let cmd =
     Term.(
       const main $ Common.setup_log $ Config.cmdliner
       $ Current_github.Auth.cmdliner $ store $ Obuilder.Sandbox.cmdliner
-      $ Current.Config.cmdliner $ Current_web.cmdliner $ token_url $ slack)
+      $ Current.Config.cmdliner $ Current_web.cmdliner $ token_url $ slack
+      $ Capnp_rpc_unix.Vat_config.cmd)
 
 let () = Cmd.(exit @@ eval cmd)

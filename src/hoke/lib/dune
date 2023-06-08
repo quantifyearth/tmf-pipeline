@@ -1,0 +1,3 @@
+(library
+ (name hoke)
+ (libraries current obuilder capnp-rpc-unix current_rpc nottui nottui-lwt))
