@@ -1,21 +1,32 @@
 (executable
  (name main)
  (public_name tmf-pipeline)
+ (foreign_stubs
+  (language c)
+  (names tty_stubs))
  (libraries
   evaluations
   current_web
   current_slack
+  websocket-lwt-unix.cohttp
   fmt.cli
   logs.cli
   fmt.tty
   capnp-rpc-unix
   current_rpc))
 
+(subdir ./static
+  (subdir ./js
+    (rule
+     (deps ../../../bin/js/index.bc.js)
+     (targets index.js)
+     (action (copy %{deps} %{targets})))))
+
 (rule
  (target static.ml)
  (deps
   (glob_files static/css/*)
   (glob_files static/img/*)
-  (glob_files static/js/*))
+  (glob_files static/js/index.js))
  (action
   (run ocaml-crunch --mode=plain --output=%{target} static)))

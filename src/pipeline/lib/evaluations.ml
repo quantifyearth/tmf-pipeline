@@ -21,8 +21,8 @@ module Python = struct
         copy ~from:`Context [ "." ] ~dst:"./";
       ]
 
-  let run ?label ?(args = []) ?script_path ?rom ~builder snapshot =
-    Current_obuilder.run ?label builder ~snapshot ?rom
+  let run ?label ?(args = []) ?script_path ?rom ?extra_files ~builder snapshot =
+    Current_obuilder.run ?label builder ~snapshot ?rom ?extra_files
       (String.concat " " (("python" :: Option.to_list script_path) @ args))
 end
 
@@ -32,6 +32,10 @@ module Repos = struct
   let evaluations _token =
     Git.clone ~gref:"main" ~schedule
       "git@github.com:carboncredits/tmf-implementation.git"
+
+  let data _token =
+    Git.clone ~gref:"main" ~schedule
+      "git@github.com:carboncredits/tmf-data.git"
 end
 
 (* Generating the configuration file, we can then use this to cache
@@ -52,7 +56,7 @@ let snapshots_to_rom
       Obuilder_spec.Rom.of_build ~hash:snap.snapshot ~build_dir target)
     lst
 
-let evaluate ~project_name ~store:_ ~builder img =
+let evaluate ~scc_values ~project_name ~builder img =
   let python_run = Python.run ~builder in
   let additionality =
     python_run
@@ -75,9 +79,85 @@ let evaluate ~project_name ~store:_ ~builder img =
         ]
     in
     python_run ~rom
+      ~extra_files:scc_values
       ~label:("permanence " ^ String.lowercase_ascii project_name)
       ~script_path:"main.py"
       ~args:[ "--method"; "permanence" ]
       img
   in
-  permanence
+  Current.ignore_value permanence
+
+(* Fetches files from a git repository, only use for smallish files. *)
+module Git_file = struct
+  open Lwt.Infix
+
+  module Git = Current_git
+  
+  module Raw = struct
+    module Git_file = struct
+      type t = No_context
+
+      let auto_cancel = true
+      let id = "git-file"
+
+      module Key = struct
+        type t = {
+          commit : Git.Commit.t;
+          files : Fpath.t list;
+        }
+
+        let to_json t =
+          `Assoc [
+            "commit", `String (Git.Commit.hash t.commit);
+            "files", `List (List.map (fun file -> (`String (Fpath.to_string file))) t.files)
+          ]
+
+        let digest t = to_json t |> Yojson.Safe.to_string
+      end
+
+      let pp ppf t = Yojson.pp ppf (Key.to_json t)
+
+      module Value = struct
+        type t = (string * string) list
+
+        let marshal ts =
+          `List (List.map (fun (p, v) -> `List [ `String p; `String v]) ts)
+          |> Yojson.Safe.to_string
+
+        let unmarshal s =
+          match Yojson.Safe.from_string s with
+          | `List lst ->
+            List.map (function `List [ `String p; `String c] -> (p, c) | _ -> failwith "Failed to unmarshal files") lst
+          | _ -> failwith "Failed to unmarshal files"
+      end
+
+      let or_raise = function
+        | Ok v -> v
+        | Error (`Msg m) -> failwith m
+
+      let build No_context (job : Current.Job.t)
+      (k : Key.t) : Value.t Current.or_error Lwt.t =
+      Current.Job.start ~level:Harmless job >>= fun () ->
+      Current_git.with_checkout ~job k.commit @@ fun dir ->
+      let paths = List.map (fun file -> Fpath.(dir // file)) k.files in
+      let contents = 
+        try
+          Ok (List.map (fun path -> (Fpath.to_string path, Bos.OS.File.read path |> or_raise)) paths)
+        with Failure msg -> Error (`Msg msg)
+      in
+      Lwt.return contents
+    end
+  end
+
+  module GitFileC = Current_cache.Make (Raw.Git_file)
+
+  let raw_git_file ?schedule commit files =
+    let key = Raw.Git_file.Key.{ commit; files } in
+    GitFileC.get ?schedule No_context key
+
+  let contents ?schedule commit files =
+    let open Current.Syntax in
+    Current.component "read %a" (Fmt.list Fpath.pp) files
+    |> let> commit = commit in
+        raw_git_file ?schedule commit files
+end

@@ -4,3 +4,6 @@
 [submodule "vendor/obuilder"]
 	path = vendor/obuilder
 	url = https://github.com/patricoferris/obuilder
+[submodule "vendor/jsoo-xterm"]
+	path = vendor/jsoo-xterm
+	url = https://github.com/patricoferris/jsoo-xterm

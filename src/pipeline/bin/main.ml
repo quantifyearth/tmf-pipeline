@@ -40,7 +40,7 @@ let read_channel_uri path =
 
 module Current_obuilder = Evaluations.Current_obuilder
 
-let pipeline ?auth token config store builder engine_config slack =
+let pipeline ?auth token config _store builder engine_config slack =
   let _channel = Some (read_channel_uri slack) in
   let _web_ui =
     let base = uri in
@@ -56,22 +56,22 @@ let pipeline ?auth token config store builder engine_config slack =
   in
   let pipeline () =
     let commit = Evaluations.Repos.evaluations token in
+    let data = Evaluations.Repos.data token in
+    let scc_values =
+      (Evaluations.Git_file.contents data [ Fpath.(v "scc.csv") ]) 
+    in
     let img =
       Current_obuilder.build ~label:"tmf" Evaluations.Python.spec builder
         (`Git commit)
     in
     let others =
       List.map
-        (fun project_name ->
-          Current.ignore_value
-          @@ Evaluations.evaluate ~project_name ~store ~builder img)
+        (fun project_name -> Evaluations.evaluate ~scc_values ~project_name ~builder img)
         others
     in
     let wlts =
       List.map
-        (fun project_name ->
-          Current.ignore_value
-          @@ Evaluations.evaluate ~project_name ~store ~builder img)
+        (fun project_name -> Evaluations.evaluate ~scc_values ~project_name ~builder img)
         wlts
     in
     let wlts =
@@ -87,16 +87,11 @@ let pipeline ?auth token config store builder engine_config slack =
   let engine = Current.Engine.create ~config:engine_config pipeline in
   (* Extra routes (in addtion to the Engine's) for authentication and webhooks. *)
   let routes =
-    Web.static_routes custom_css
+    Web.static_routes ~engine builder custom_css
     @ [
         Routes.((s "login" /? nil) @--> Current_github.Auth.login auth)
-        (* Routes.(
-           (s "webhooks" / s "github" /? nil)
-           @--> Current_github.webhook ~engine ~webhook_secret
-                  ~get_job_ids:Index.get_job_ids); *);
       ]
   in
-  (* let authn = Current_github.Auth.make_login_uri (Option.get auth) in *)
   let site =
     Current_web.Site.v ~custom_css ~has_role ~name:"4c-evaluations"
       (routes @ Current_web.routes engine)

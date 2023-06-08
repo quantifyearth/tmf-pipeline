@@ -117,10 +117,9 @@ let job_ui (job : job) =
   let arrow = if job.expanded then "▼ " else "▶ " in
   let base =
     if job.expanded then
-      [
-        W.fmt ~attr "%s%s" arrow job.status.id;
-        W.fmt ~attr:Notty.A.(st italic) "%s" job.status.description;
-      ]
+        W.fmt ~attr "%s%s" arrow job.status.id ::
+        (String.split_on_char '\n' job.status.description |>
+        List.map (W.fmt ~attr:Notty.A.(st italic) "%s"))
     else [ W.fmt ~attr "%s%s" arrow job.status.id ]
   in
   Ui.vcat base

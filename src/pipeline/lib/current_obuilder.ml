@@ -204,12 +204,13 @@ let build ?level ?schedule ?label ?pool spec builder src =
      Raw.build ?pool ?level ?schedule builder spec commit
 
 let run ?level ?schedule ?label ?pool builder
-    ?(rom : (string * string * Raw.Build.Value.t) list Current.t option) ?env
+    ?(rom : (string * string * Raw.Build.Value.t) list Current.t option) ?(extra_files : (string * string) list Current.t option) ?env
     ~snapshot cmd =
   let open Current.Syntax in
   Current.component "run%a" pp_sp_label label
   |> let> (snapshot : Raw.Build.Value.t) = snapshot
-     and> rom = Current.option_seq rom in
+     and> rom = Current.option_seq rom
+     and> _extra_files = Current.option_seq extra_files in
      let spec = snapshot.ctx.spec in
      let env =
        match env with Some (k, v) -> [ Obuilder_spec.env k v ] | None -> []
