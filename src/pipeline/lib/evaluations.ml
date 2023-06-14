@@ -6,7 +6,7 @@ module Github = Current_github
 module Current_obuilder = Current_obuilder
 
 let arkdir = "/data"
-let wdir = "/usr/src/app"
+let wdir = "/home/tmf/app"
 let ( / ) = Filename.concat
 
 module Python = struct
@@ -14,10 +14,21 @@ module Python = struct
     let open Obuilder_spec in
     stage ~from:"python:3.10-bullseye"
       [
+        (* Install VSCode Server *)
+        (* run "apt-get install wget gpg";
+        run ~network:[ "host" ] "wget --no-check-certificate -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg";
+        run {| install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg |};
+        run ~network:[ "host" ] {| sh -c 'echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list' |};
+        run "rm -f packages.microsoft.gpg";
+        run ~network:[ "host" ] "apt install -y apt-transport-https && apt update && apt install -y code"; *)
+        (* App specific *)
         workdir wdir;
+        run "useradd -ms /bin/bash -u 1000 tmf";
+        run "chown -R tmf:tmf /home/tmf";
+        Obuilder_spec.user_unix ~uid:1000 ~gid:1000;
         copy ~from:`Context [ "requirements.txt" ] ~dst:"./";
         run ~network:[ "host" ] "pip install --no-cache-dir -r requirements.txt";
-        run "mkdir ./data";
+        run "whoami && ls -la . && mkdir ./data";
         copy ~from:`Context [ "." ] ~dst:"./";
       ]
 
