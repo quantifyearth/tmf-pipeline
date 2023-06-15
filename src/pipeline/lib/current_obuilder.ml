@@ -6,6 +6,73 @@ type builder =
 type store = Obuilder.Store_spec.store
 
 let ( / ) = Filename.concat
+let or_raise = function Ok v -> v | Error (`Msg m) -> failwith m
+
+module Extra_files = struct
+  type file = Contents of Fpath.t * string | Git of Git.Commit.t * Fpath.t
+  type dir = Fpath.t
+
+  let to_yojson = function
+    | Contents (path, c) ->
+        `Assoc
+          [ ("contents", `List [ `String (Fpath.to_string path); `String c ]) ]
+    | Git (commit, path) ->
+        `Assoc
+          [
+            ( "git",
+              `List
+                [
+                  `String (Git.Commit.marshal commit);
+                  `String (Fpath.to_string path);
+                ] );
+          ]
+
+  let of_yojson = function
+    | `Assoc [ ("contents", `List [ `String path; `String c ]) ] ->
+        let path = Fpath.of_string path |> or_raise in
+        Contents (path, c)
+    | `Assoc [ ("git", `List [ `String commit; `String path ]) ] ->
+        let path = Fpath.of_string path |> or_raise in
+        let commit = Git.Commit.unmarshal commit in
+        Git (commit, path)
+    | _ -> invalid_arg "failed to unmarshal extra files description"
+
+  let cp_r ~cancellable ~job ~src ~dst =
+    let cmd =
+      [| "cp"; "-a"; "--"; Fpath.to_string src; Fpath.to_string dst |]
+    in
+    Current.Process.exec ~cancellable ~job ("", cmd)
+
+  let mv ~cancellable ~job ~src ~dst =
+    let cmd = [| "mv"; Fpath.to_string src; Fpath.to_string dst |] in
+    Current.Process.exec ~cancellable ~job ("", cmd)
+
+  let with_extra_files ?pool job extra_files fn =
+    let open Lwt.Infix in
+    let switch = Current.Switch.create ~label:"files" () in
+    (* let digest = `List (List.map to_yojson extra_files) |> Yojson.to_string |> Digest.string |> Digest.to_hex in  *)
+    Lwt.finalize
+      (fun () ->
+        (match pool with
+        | Some pool -> Current.Job.use_pool ~switch job pool
+        | None -> Lwt.return_unit)
+        >>= fun () ->
+        (* let state = Current.state_dir "extra-files" in *)
+        Current.Process.with_tmpdir ~prefix:"extra-files" @@ fun datadir ->
+        let copy_file = function
+          | Git (git, path) ->
+              Git.with_checkout ~job ?pool git @@ fun tmpdir ->
+              cp_r ~cancellable:true ~job
+                ~src:Fpath.(tmpdir // path)
+                ~dst:Fpath.(datadir // path)
+          | Contents (path, content) ->
+              (* TODO: non-blocking version *)
+              Lwt.return (Bos.OS.File.write Fpath.(datadir // path) content)
+        in
+        Lwt_list.map_p copy_file extra_files >>= fun _lst -> fn datadir
+        (* mv ~cancellable:true ~job ~src:datadir ~dst:Fpath.(state / digest) *))
+      (fun () -> Current.Switch.turn_off switch)
+end
 
 module Raw = struct
   module Build = struct
@@ -19,24 +86,29 @@ module Raw = struct
     module Key = struct
       type t = {
         spec : Obuilder_spec.t;
-        source : [ `No_context | `Git of Current_git.Commit.t ];
+        source :
+          [ `No_context | `Git of Current_git.Commit.t | `Dir of Fpath.t ];
+        extra_files : Extra_files.file list;
       }
 
       let source_hash = function
         | `No_context -> `Null
         | `Git commit ->
             `Assoc [ ("git", `String (Current_git.Commit.hash commit)) ]
+        | `Dir path -> `Assoc [ ("dir", `String (Fpath.to_string path)) ]
 
       let source_to_json = function
         | `No_context -> `Null
-        | `Git commit ->
-            `Assoc [ ("git", Current_git.Commit.to_yojson commit) ]
+        | `Git commit -> `Assoc [ ("git", Current_git.Commit.to_yojson commit) ]
+        | `Dir path -> `Assoc [ ("dir", `String (Fpath.to_string path)) ]
 
       let source_of_json = function
         | `Null -> `No_context
         | `Assoc [ ("git", git) ] ->
-             let git = Current_git.Commit.of_yojson git |> Result.get_ok in
+            let git = Current_git.Commit.of_yojson git |> Result.get_ok in
             `Git git
+        | `Assoc [ ("dir", `String path) ] ->
+            `Dir (Fpath.of_string path |> or_raise)
         | _ -> failwith "Unknown context for obuilder"
 
       let to_json ~source t =
@@ -46,14 +118,21 @@ module Raw = struct
             ("spec", `String spec);
             ("spec_digest", `String (Digest.string spec |> Digest.to_hex));
             ("source", source t.source);
+            ("extra_files", `List (List.map Extra_files.to_yojson t.extra_files));
           ]
 
       let of_json = function
-        | `Assoc [ ("spec", `String spec); ("spec_digest", _); ("source", v) ]
-          ->
+        | `Assoc
+            [
+              ("spec", `String spec);
+              ("spec_digest", _);
+              ("source", v);
+              ("extra_files", `List files);
+            ] ->
             let spec = Sexplib.Sexp.of_string spec |> Obuilder_spec.t_of_sexp in
             let source = source_of_json v in
-            { spec; source }
+            let extra_files = List.map Extra_files.of_yojson files in
+            { spec; source; extra_files }
         | _ -> failwith "Failed to unmarshal "
 
       let digest t = Yojson.Safe.to_string (to_json ~source:source_hash t)
@@ -127,8 +206,9 @@ module Raw = struct
 
   module BuildC = Current_cache.Make (Build)
 
-  let build ?pool ?timeout ?level ?schedule builder spec source =
-    let key = Build.Key.{ spec; source } in
+  let build ?pool ?timeout ?level ?schedule ?(extra_files = []) builder spec
+      source =
+    let key = Build.Key.{ spec; source; extra_files } in
     let ctx = Build.{ pool; timeout; level; builder } in
     BuildC.get ?schedule ctx key
 
@@ -196,6 +276,7 @@ let pp_sp_label = Fmt.(option (sp ++ string))
 let get_build_context = function
   | `No_context -> Current.return `No_context
   | `Git commit -> Current.map (fun x -> `Git x) commit
+  | `Dir _ as v -> Current.return v
 
 let build ?level ?schedule ?label ?pool spec builder src =
   let open Current.Syntax in
@@ -204,13 +285,13 @@ let build ?level ?schedule ?label ?pool spec builder src =
      Raw.build ?pool ?level ?schedule builder spec commit
 
 let run ?level ?schedule ?label ?pool builder
-    ?(rom : (string * string * Raw.Build.Value.t) list Current.t option) ?(extra_files : (string * string) list Current.t option) ?env
-    ~snapshot cmd =
+    ?(rom : (string * string * Raw.Build.Value.t) list Current.t option)
+    ?(extra_files : Extra_files.file list Current.t option) ?env ~snapshot cmd =
   let open Current.Syntax in
   Current.component "run%a" pp_sp_label label
   |> let> (snapshot : Raw.Build.Value.t) = snapshot
      and> rom = Current.option_seq rom
-     and> _extra_files = Current.option_seq extra_files in
+     and> extra_files = Current.option_seq extra_files in
      let spec = snapshot.ctx.spec in
      let env =
        match env with Some (k, v) -> [ Obuilder_spec.env k v ] | None -> []
@@ -238,7 +319,8 @@ let run ?level ?schedule ?label ?pool builder
        Obuilder_spec.stage ~child_builds:spec.child_builds ~from:spec.from
          (spec.ops @ env @ symlinks @ [ Obuilder_spec.run ~rom "%s" cmd ])
      in
-     Raw.build ?pool ?level ?schedule builder spec snapshot.ctx.source
+     Raw.build ?pool ?level ?schedule ?extra_files builder spec
+       snapshot.ctx.source
 
 let contents ?level ?schedule ?label ?pool ~snapshot store files =
   let open Current.Syntax in

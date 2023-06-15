@@ -4,6 +4,7 @@
   (pps ppx_deriving_yojson))
  (libraries
   current
+  digestif
   current_git
   current_github
   current_docker

@@ -21,7 +21,7 @@ let has_role user role =
           true (* These users have all roles *)
       | _ -> role = `Viewer)
 
-let label l t =
+let _label l t =
   let open Current.Syntax in
   Current.component "%s" l
   |> let> v = t in
@@ -40,57 +40,52 @@ let read_channel_uri path =
 
 module Current_obuilder = Evaluations.Current_obuilder
 
-let pipeline ?auth token config _store builder engine_config slack =
+let pipeline ?auth token _config _store builder engine_config slack =
+  let open Current.Syntax in
   let _channel = Some (read_channel_uri slack) in
   let _web_ui =
     let base = uri in
     fun repo -> Uri.with_query' base [ ("repo", repo) ]
   in
-  let others, wlts =
-    List.fold_left
-      (fun (others, wlt) v ->
-        match String.split_on_char '_' v with
-        | "WLT" :: _ -> (others, v :: wlt)
-        | _ -> (v :: others, wlt))
-      ([], []) config.Config.projects
-  in
   let pipeline () =
     let commit = Evaluations.Repos.evaluations token in
     let data = Evaluations.Repos.data token in
-    let scc_values =
-      (Evaluations.Git_file.contents data [ Fpath.(v "scc.csv") ]) 
+    let _scc_values =
+      Evaluations.Git_file.directory_contents data (Fpath.v "scc")
+    in
+    let projects_dir =
+      Evaluations.Git_file.directory_contents data (Fpath.v "projects")
     in
     let img =
       Current_obuilder.build ~label:"tmf" Evaluations.Python.spec builder
         (`Git commit)
     in
     let others =
-      List.map
-        (fun project_name -> Evaluations.evaluate ~scc_values ~project_name ~builder img)
-        others
+      Current.component "Evaluate Projects"
+      |> let** projects_dir = projects_dir in
+         let config_img =
+           Current_obuilder.build Evaluations.data_spec builder
+             (`Dir projects_dir.dir)
+         in
+         let projects = List.filteri (fun i _ -> i < 1) projects_dir.files in
+         let evals =
+           List.map
+             (fun project_name ->
+               Evaluations.evaluate ~config_img
+                 ~project_name:(Fpath.filename project_name)
+                 ~builder img)
+             projects
+         in
+         Current.all evals
     in
-    let wlts =
-      List.map
-        (fun project_name -> Evaluations.evaluate ~scc_values ~project_name ~builder img)
-        wlts
-    in
-    let wlts =
-      let input = label "WLT Projects" img in
-      let _, v =
-        Current.collapse_list ~key:"projects" ~value:"wlt" ~input wlts
-      in
-      v
-    in
-    Current.all (others @ [ wlts ])
+    others
   in
   let custom_css = "custom.css" in
   let engine = Current.Engine.create ~config:engine_config pipeline in
   (* Extra routes (in addtion to the Engine's) for authentication and webhooks. *)
   let routes =
     Web.static_routes ~engine builder custom_css
-    @ [
-        Routes.((s "login" /? nil) @--> Current_github.Auth.login auth)
-      ]
+    @ [ Routes.((s "login" /? nil) @--> Current_github.Auth.login auth) ]
   in
   let site =
     Current_web.Site.v ~custom_css ~has_role ~name:"4c-evaluations"
