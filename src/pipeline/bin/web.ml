@@ -2,9 +2,11 @@ open Lwt.Infix
 open Evaluations
 module Server = Cohttp_lwt_unix.Server
 
-external tty_output_buffer_size : Unix.file_descr -> int = "caml_tmf_output_buffer_count"
+external tty_output_buffer_size : Unix.file_descr -> int
+  = "caml_tmf_output_buffer_count"
 
-let (>>!=) v f = v >>= function
+let ( >>!= ) v f =
+  v >>= function
   | Ok v -> f v
   | Error (`Msg m) -> Lwt.fail (Failure m)
   | Error `Cancelled -> Lwt.fail (Failure "Cancelled")
@@ -31,7 +33,8 @@ let crunch ?content_type ?(max_age = 86400) _ =
                 ("Cache-Control", Printf.sprintf "public, max-age=%d;" max_age);
               ]
           in
-          Server.respond_string ~status:`OK ~headers ~body () >|= fun r -> `Response r
+          Server.respond_string ~status:`OK ~headers ~body () >|= fun r ->
+          `Response r
   end
 
 let terminal _id =
@@ -40,7 +43,8 @@ let terminal _id =
     val! can_get = `Viewer
 
     method! private get (_ctx : Current_web.Context.t) =
-      let body = {|
+      let body =
+        {|
       <!DOCTYPE html>
       <html lang="en">
       <head>
@@ -69,18 +73,20 @@ let terminal _id =
       </html>
       |}
       in
-      let headers = Cohttp.Header.of_list [
-        "Content-Type", "text/html";
-        "Content-Length", string_of_int (String.length body)
-      ]
+      let headers =
+        Cohttp.Header.of_list
+          [
+            ("Content-Type", "text/html");
+            ("Content-Length", string_of_int (String.length body));
+          ]
       in
-          Server.respond_string ~status:`OK ~headers ~body () >|= fun r -> `Response r
+      Server.respond_string ~status:`OK ~headers ~body () >|= fun r ->
+      `Response r
   end
 
 let read_all fd =
   let bytes = Bytes.create 1024 in
-  Lwt_unix.read fd bytes 0 1024 >|= fun i ->
-  Bytes.sub bytes 0 i
+  Lwt_unix.read fd bytes 0 1024 >|= fun i -> Bytes.sub bytes 0 i
 
 let connect (Builder ((module B), b) : Current_obuilder.builder) id =
   object
@@ -92,9 +98,14 @@ let connect (Builder ((module B), b) : Current_obuilder.builder) id =
       let open Websocket in
       Logs.info (fun f -> f "Listening for RUNC%!");
       let req = Current_web.Context.request ctx in
-      let fd_passer = Lwt_unix.socket ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+      let fd_passer =
+        Lwt_unix.socket ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0
+      in
       Lwt_unix.setsockopt fd_passer Unix.SO_REUSEADDR true;
-      let unix_sock = Filename.concat "/tmp/" ("runc-" ^ (string_of_int @@ Random.int 999999) ^ ".sock") in 
+      let unix_sock =
+        Filename.concat "/tmp/"
+          ("runc-" ^ (string_of_int @@ Random.int 999999) ^ ".sock")
+      in
       Lwt_unix.bind fd_passer (Unix.ADDR_UNIX unix_sock) >>= fun () ->
       Lwt_unix.listen fd_passer 5;
       let established, _exited = B.shell ~unix_sock b id in
@@ -111,22 +122,23 @@ let connect (Builder ((module B), b) : Current_obuilder.builder) id =
           match opcode with
           | Frame.Opcode.Close -> Logs.app (fun m -> m "[RECV] CLOSE")
           | _ ->
-            let i = Unix.write console_fd_unix (Bytes.of_string content) 0 (String.length content) in
-            Logs.info (fun f -> f "Wrote %i bytes to pty" i)
-      )
+              let i =
+                Unix.write console_fd_unix (Bytes.of_string content) 0
+                  (String.length content)
+              in
+              Logs.info (fun f -> f "Wrote %i bytes to pty" i))
       >>= fun (resp, frames_out_fn) ->
       (* send a message to the client every second *)
       let rec go () =
         read_all console_fd >>= fun msg ->
         let msg = Bytes.to_string msg in
-        Lwt.wrap1 frames_out_fn @@ Some (Frame.create ~content:msg ())
-        >>= go
+        Lwt.wrap1 frames_out_fn @@ Some (Frame.create ~content:msg ()) >>= go
       in
       Lwt.async go;
       Lwt.return resp
   end
 
-module HMap = Hashtbl.Make(String)
+module HMap = Hashtbl.Make (String)
 
 let static_routes ~engine builder custom_css =
   [
@@ -138,5 +150,6 @@ let static_routes ~engine builder custom_css =
       @--> crunch ~content_type:"text/javascript" "js/index.js");
     Routes.((s "img" / str /? nil) @--> crunch);
     Routes.((s "terminal" / str /? nil) @--> terminal);
-    Routes.((s "terminal" / str / s "connect" /? nil) @--> connect builder)
-  ] @ Web_job.routes ~engine
+    Routes.((s "terminal" / str / s "connect" /? nil) @--> connect builder);
+  ]
+  @ Web_job.routes ~engine

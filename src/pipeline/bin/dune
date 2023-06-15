@@ -15,12 +15,15 @@
   capnp-rpc-unix
   current_rpc))
 
-(subdir ./static
-  (subdir ./js
-    (rule
-     (deps ../../../bin/js/index.bc.js)
-     (targets index.js)
-     (action (copy %{deps} %{targets})))))
+(subdir
+ ./static
+ (subdir
+  ./js
+  (rule
+   (deps ../../../bin/js/index.bc.js)
+   (targets index.js)
+   (action
+    (copy %{deps} %{targets})))))
 
 (rule
  (target static.ml)
