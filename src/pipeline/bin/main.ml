@@ -40,7 +40,7 @@ let read_channel_uri path =
 
 module Current_obuilder = Evaluations.Current_obuilder
 
-let pipeline ?auth token _config _store builder engine_config slack =
+let pipeline ?auth _token _config _store builder engine_config slack =
   let open Current.Syntax in
   let _channel = Some (read_channel_uri slack) in
   let _web_ui =
@@ -48,13 +48,12 @@ let pipeline ?auth token _config _store builder engine_config slack =
     fun repo -> Uri.with_query' base [ ("repo", repo) ]
   in
   let pipeline () =
-    let commit = Evaluations.Repos.evaluations token in
-    let data = Evaluations.Repos.data token in
-    let _scc_values =
-      Evaluations.Git_file.directory_contents data (Fpath.v "scc")
-    in
+    let open Evaluations in
+    let commit = Evaluations.Repos.tmf_implementation () in
+    let data = Evaluations.Repos.tmf_data () in
+    let _scc_values = Current_gitfile.directory_contents data (Fpath.v "scc") in
     let projects_dir =
-      Evaluations.Git_file.directory_contents data (Fpath.v "projects")
+      Current_gitfile.directory_contents data (Fpath.v "projects")
     in
     let img =
       Current_obuilder.build ~label:"tmf" Evaluations.Python.spec builder
@@ -67,6 +66,7 @@ let pipeline ?auth token _config _store builder engine_config slack =
            Current_obuilder.build Evaluations.data_spec builder
              (`Dir projects_dir.dir)
          in
+         (* TODO: Make this a parameter so we can run the pipeline but not for ALL projects. *)
          let projects = List.filteri (fun i _ -> i < 1) projects_dir.files in
          let evals =
            List.map
