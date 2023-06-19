@@ -21,7 +21,7 @@ module Python = struct
     stage ~from:"ghcr.io/osgeo/gdal:ubuntu-small-3.6.4"
       [
         run ~network:[ "host" ]
-          "apt-get update -qqy && apt-get install -qy git libpq-dev \
+          "apt-get update -qqy && apt-get install -qy git wget libpq-dev \
            python3-pip  && rm -rf /var/lib/apt/lists/* && rm -rf \
            /var/cache/apt/*";
         run "useradd -ms /bin/bash -u 1000 tmf";
@@ -34,11 +34,12 @@ module Python = struct
         copy ~from:`Context [ "requirements.txt" ] ~dst:"./";
         run ~network:[ "host" ] "pip install --no-cache-dir -r requirements.txt";
         run "whoami && ls -la . && mkdir ./data";
+        run "echo 'verbose=off' > /home/tmf/.wgetrc";
         copy ~from:`Context [ "." ] ~dst:"./";
       ]
 
-  let run ?label ?(args = []) ?script_path ?rom ?extra_files ~builder snapshot =
-    Current_obuilder.run ?label builder ~snapshot ?rom ?extra_files
+  let run ?label ?(args = []) ?script_path ?rom ?extra_files ?env ?network ~builder snapshot =
+    Current_obuilder.run ?label builder ~snapshot ?rom ?extra_files ?env ?network
       (String.concat " " (("python" :: Option.to_list script_path) @ args))
 end
 
@@ -62,7 +63,21 @@ let snapshots_to_rom
       Obuilder_spec.Rom.of_build ~hash:snap.snapshot ~build_dir target)
     lst
 
-let evaluate ~project_name ~builder ~config_img img =
+let jrc ~builder img =
+  Python.run ~builder
+    ~label:"JRC"
+    (* Not sure if these env variables are actually used in this part? *)
+    ~env:[
+      "DATA_PATH", "./data";
+      "USER_PATH", "/home/tmf";
+      "EARTH_DATA_COOKIE_FILE", "./cookie";
+    ]
+    ~network:[ "host" ]
+    ~script_path:"./methods/inputs/download_jrc_data.py"
+    ~args:[ "./data/zip"; "./data/tif" ]
+    img
+
+let evaluate ~project_name ~builder ~jrc ~config_img img =
   let python_run = Python.run ~builder in
   let buffer =
     let rom =
@@ -73,10 +88,22 @@ let evaluate ~project_name ~builder ~config_img img =
       ~args:[ "data/" ^ project_name; "data/output.geojson" ]
       img
   in
+  let carbon =
+    let rom =
+      Current.list_seq [
+        Current.map (fun v -> (wdir / "data", wdir, v)) buffer;
+        Current.map (fun v -> (arkdir, wdir, v)) jrc 
+      ]
+    in
+    python_run ~rom ~label:"carbon density (todo)"
+      ~script_path:"main.py"
+      ~args:[ "--method"; "additionality" ]
+      img
+  in
   let additionality =
     let rom =
       Current.list_seq
-        [ Current.map (fun v -> (wdir / "data", wdir, v)) buffer ]
+        [ Current.map (fun v -> (wdir / "data", wdir, v)) carbon ]
     in
     python_run ~rom ~label:"additionality" ~script_path:"main.py"
       ~args:[ "--method"; "additionality" ]
