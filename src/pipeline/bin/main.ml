@@ -59,11 +59,12 @@ let pipeline ?auth _token _config _store builder engine_config slack =
       Current_obuilder.build ~label:"tmf" Evaluations.Python.spec builder
         (`Git commit)
     in
+    let jrc = Evaluations.jrc ~builder img in
     let others =
       Current.component "Evaluate Projects"
       |> let** projects_dir = projects_dir in
          let config_img =
-           Current_obuilder.build Evaluations.data_spec builder
+           Current_obuilder.build ~label:"config" Evaluations.data_spec builder
              (`Dir projects_dir.dir)
          in
          (* TODO: Make this a parameter so we can run the pipeline but not for ALL projects. *)
@@ -71,7 +72,7 @@ let pipeline ?auth _token _config _store builder engine_config slack =
          let evals =
            List.map
              (fun project_name ->
-               Evaluations.evaluate ~config_img
+               Evaluations.evaluate ~jrc ~config_img
                  ~project_name:(Fpath.filename project_name)
                  ~builder img)
              projects
