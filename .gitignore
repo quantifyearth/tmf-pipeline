@@ -6,6 +6,7 @@ zfs.img
 .vscode
 .slack
 .github-token-file
+secrets
 
 *.pem
 *.cap

@@ -64,9 +64,10 @@ module Python = struct
       ]
 
   let run ?label ?(args = []) ?script_path ?rom ?extra_files ?env ?network
-      ~builder snapshot =
+      ?secrets ~ctx_secrets ~builder snapshot =
+    let ctx_secrets = [ ("earthdata", ctx_secrets) ] in
     Current_obuilder.run ?label builder ~snapshot ?rom ?extra_files ?env
-      ?network
+      ?secrets ~ctx_secrets ?network
       (String.concat " " (("python" :: Option.to_list script_path) @ args))
 end
 
@@ -91,7 +92,7 @@ let snapshots_to_rom
     lst
 
 let jrc ~builder img =
-  Python.run ~builder
+  Python.run ~builder ~ctx_secrets:""
     ~label:"JRC"
       (* Not sure if these env variables are actually used in this part? *)
     ~env:
@@ -110,8 +111,13 @@ let label l t =
   |> let> v = t in
      Current.Primitive.const v
 
-let evaluate ~project_name ~builder ~jrc ~config_img img =
-  let python_run = Python.run ~builder in
+let evaluate ~project_name ~builder ~jrc ~gedi_base_img ~config_img img =
+  (* TODO: Move this out of the pipeline and in general provide a generic way
+     to handle secrets. *)
+  let ctx_secrets =
+    Bos.OS.File.read (Fpath.v "./secrets/.env") |> Result.get_ok
+  in
+  let python_run = Python.run ~ctx_secrets ~builder in
   let buffer =
     let rom =
       Current.list_seq [ Current.map (fun v -> (arkdir, wdir, v)) config_img ]
@@ -120,6 +126,19 @@ let evaluate ~project_name ~builder ~jrc ~config_img img =
       ~script_path:"./methods/inputs/generate_boundary.py"
       ~args:[ input_dir / project_name; output_dir / "output.geojson" ]
       img
+  in
+  let gedi =
+    let earthdata =
+      Obuilder_spec.Secret.v "earthdata" ~target:"/home/tmf/app/.env"
+    in
+    let rom =
+      Current.list_seq
+        [ Current.map (fun v -> (wdir / "data", wdir, v)) buffer ]
+    in
+    python_run ~label:"GEDI" ~network:[ "host" ]
+      ~script_path:"./methods/inputs/download_gedi_data.py"
+      ~args:[ input_dir / "output.geojson"; output_dir / "gedi" ]
+      ~secrets:[ earthdata ] ~rom gedi_base_img
   in
   let luc =
     let rom =
@@ -145,6 +164,7 @@ let evaluate ~project_name ~builder ~jrc ~config_img img =
         [
           Current.map (fun v -> (wdir / "data", wdir, v)) buffer;
           Current.map (fun v -> (wdir / "data", wdir, v)) luc;
+          Current.map (fun v -> (wdir / "data", wdir, v)) gedi;
         ]
     in
     python_run ~rom ~label:"carbon density (todo)" ~script_path:"main.py"

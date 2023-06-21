@@ -54,6 +54,10 @@ let pipeline ?auth _token _config _store builder engine_config slack =
       Evaluations.Repos.tmf_implementation
         "a376fc3b8be67c31c98261dff618311de9df4209"
     in
+    let tmf_gedi =
+      Evaluations.Repos.tmf_implementation
+        "c4768217195dd31e4a2fccd31e1a21cef09708cb"
+    in
     let data = Evaluations.Repos.tmf_data () in
     let _scc_values = Current_gitfile.directory_contents data (Fpath.v "scc") in
     let projects_dir =
@@ -71,8 +75,12 @@ let pipeline ?auth _token _config _store builder engine_config slack =
         builder (`Git tmf_main)
     in
     let jrc_input =
-      Current_obuilder.build ~label:"tmf" Evaluations.Python.spec builder
+      Current_obuilder.build ~label:"jrc" Evaluations.Python.spec builder
         (`Git tmf_jrc)
+    in
+    let gedi_input =
+      Current_obuilder.build ~label:"gedi" Evaluations.Python.spec builder
+        (`Git tmf_gedi)
     in
     let jrc = Evaluations.jrc ~builder jrc_input in
     let others =
@@ -87,7 +95,7 @@ let pipeline ?auth _token _config _store builder engine_config slack =
          let evals =
            List.map
              (fun project_name ->
-               Evaluations.evaluate ~jrc ~config_img
+               Evaluations.evaluate ~jrc ~config_img ~gedi_base_img:gedi_input
                  ~project_name:(Fpath.filename project_name)
                  ~builder img)
              projects
