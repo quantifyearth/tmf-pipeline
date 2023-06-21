@@ -49,17 +49,32 @@ let pipeline ?auth _token _config _store builder engine_config slack =
   in
   let pipeline () =
     let open Evaluations in
-    let commit = Evaluations.Repos.tmf_implementation () in
+    let tmf_main = Evaluations.Repos.tmf_implementation "main" in
+    let tmf_jrc =
+      Evaluations.Repos.tmf_implementation
+        "a376fc3b8be67c31c98261dff618311de9df4209"
+    in
     let data = Evaluations.Repos.tmf_data () in
     let _scc_values = Current_gitfile.directory_contents data (Fpath.v "scc") in
     let projects_dir =
       Current_gitfile.directory_contents data (Fpath.v "projects")
     in
+    (* HACK:
+       Currently all of our python code lives in the same repository which means every time
+       a new commit is pushed, we have to update all of the nodes essentially including large
+       data imports (even if that part of the code is unchanged). To get around this I'm creating
+       a few different images with different Git contexts -- the actual computation parts will
+       track `main` whereas the data inputs will be pinned to specific commits.
+    *)
     let img =
-      Current_obuilder.build ~label:"tmf" Evaluations.Python.spec builder
-        (`Git commit)
+      Current_obuilder.build ~label:"tmf" Evaluations.Python.spec_with_data_dir
+        builder (`Git tmf_main)
     in
-    let jrc = Evaluations.jrc ~builder img in
+    let jrc_input =
+      Current_obuilder.build ~label:"tmf" Evaluations.Python.spec builder
+        (`Git tmf_jrc)
+    in
+    let jrc = Evaluations.jrc ~builder jrc_input in
     let others =
       Current.component "Evaluate Projects"
       |> let** projects_dir = projects_dir in
@@ -68,7 +83,7 @@ let pipeline ?auth _token _config _store builder engine_config slack =
              (`Dir projects_dir.dir)
          in
          (* TODO: Make this a parameter so we can run the pipeline but not for ALL projects. *)
-         let projects = List.filteri (fun i _ -> i < 1) projects_dir.files in
+         let projects = List.filteri (fun i _ -> i < 2) projects_dir.files in
          let evals =
            List.map
              (fun project_name ->
@@ -84,8 +99,10 @@ let pipeline ?auth _token _config _store builder engine_config slack =
   let custom_css = "custom.css" in
   let engine = Current.Engine.create ~config:engine_config pipeline in
   (* Extra routes (in addtion to the Engine's) for authentication and webhooks. *)
+  let store = Fpath.v "/obuilder-zfs" in
+  (* TODO: not hardcoded *)
   let routes =
-    Web.static_routes ~engine builder custom_css
+    Web.static_routes ~store ~engine builder custom_css
     @ [ Routes.((s "login" /? nil) @--> Current_github.Auth.login auth) ]
   in
   let site =

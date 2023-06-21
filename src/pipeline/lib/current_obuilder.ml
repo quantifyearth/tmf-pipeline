@@ -286,18 +286,20 @@ let build ?level ?schedule ?label ?pool spec builder src =
 
 let run ?level ?schedule ?label ?pool builder
     ?(rom : (string * string * Raw.Build.Value.t) list Current.t option)
-    ?(extra_files : Extra_files.file list Current.t option) ?(env=[]) ?network ~snapshot cmd =
+    ?(extra_files : Extra_files.file list Current.t option) ?(env = []) ?network
+    ~snapshot cmd =
   let open Current.Syntax in
   Current.component "run%a" pp_sp_label label
   |> let> (snapshot : Raw.Build.Value.t) = snapshot
      and> rom = Current.option_seq rom
      and> extra_files = Current.option_seq extra_files in
      let spec = snapshot.ctx.spec in
-     let env = List.map (fun (k, v) -> Obuilder_spec.env k v ) env in
+     let env = List.map (fun (k, v) -> Obuilder_spec.env k v) env in
      let rom, symlinks =
        match rom with
        | None -> ([], [])
        | Some vs ->
+           (* Mount the data inputs into the /data directory *)
            let roms =
              List.map
                (fun (build_dir, _, snap) ->
@@ -306,16 +308,18 @@ let run ?level ?schedule ?label ?pool builder
                vs
            in
            ( roms,
+             (* Symlink the data inputs to an inputs directory in the working directory specificed *)
              List.map2
                (fun (_, wdir, snap) rom ->
-                 Obuilder_spec.run ~rom:[ rom ] "ln -s %s/* %s/data/"
+                 Obuilder_spec.run ~rom:[ rom ] "ln -s %s/* %s/inputs/"
                    ("/data" / snap.Raw.Build.Value.snapshot)
                    wdir)
                vs roms )
      in
      let spec =
        Obuilder_spec.stage ~child_builds:spec.child_builds ~from:spec.from
-         (spec.ops @ env @ symlinks @ [ Obuilder_spec.run ?network ~rom "%s" cmd ])
+         (spec.ops @ env @ symlinks
+         @ [ Obuilder_spec.run ?network ~rom "%s" cmd ])
      in
      Raw.build ?pool ?level ?schedule ?extra_files builder spec
        snapshot.ctx.source

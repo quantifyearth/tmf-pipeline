@@ -5,8 +5,11 @@ module Github = Current_github
 module Current_obuilder = Current_obuilder
 module Current_gitfile = Current_gitfile
 
-let arkdir = "/data"
+let arkdir = "/inputs"
 let wdir = "/home/tmf/app"
+let input_dir = "./inputs"
+let output_dir = "./data"
+let ( / ) = Filename.concat
 
 let data_spec =
   let open Obuilder_spec in
@@ -28,26 +31,50 @@ module Python = struct
         workdir wdir;
         run "chown -R tmf:tmf /home/tmf";
         Obuilder_spec.user_unix ~uid:1000 ~gid:1000;
-        run "pip install --upgrade pip";
-        run "pip install numpy";
-        run "pip install gdal[numpy]==3.6.4";
+        run ~network:[ "host" ] "pip install --upgrade pip";
+        run ~network:[ "host" ] "pip install numpy";
+        run ~network:[ "host" ] "pip install gdal[numpy]==3.6.4";
         copy ~from:`Context [ "requirements.txt" ] ~dst:"./";
         run ~network:[ "host" ] "pip install --no-cache-dir -r requirements.txt";
-        run "whoami && ls -la . && mkdir ./data";
+        run "whoami && ls -la . && mkdir ./inputs";
         run "echo 'verbose=off' > /home/tmf/.wgetrc";
         copy ~from:`Context [ "." ] ~dst:"./";
       ]
 
-  let run ?label ?(args = []) ?script_path ?rom ?extra_files ?env ?network ~builder snapshot =
-    Current_obuilder.run ?label builder ~snapshot ?rom ?extra_files ?env ?network
+  let spec_with_data_dir =
+    let open Obuilder_spec in
+    stage ~from:"ghcr.io/osgeo/gdal:ubuntu-small-3.6.4"
+      [
+        run ~network:[ "host" ]
+          "apt-get update -qqy && apt-get install -qy git wget libpq-dev \
+           python3-pip  && rm -rf /var/lib/apt/lists/* && rm -rf \
+           /var/cache/apt/*";
+        run "useradd -ms /bin/bash -u 1000 tmf";
+        workdir wdir;
+        run "chown -R tmf:tmf /home/tmf";
+        Obuilder_spec.user_unix ~uid:1000 ~gid:1000;
+        run ~network:[ "host" ] "pip install --upgrade pip";
+        run ~network:[ "host" ] "pip install numpy";
+        run ~network:[ "host" ] "pip install gdal[numpy]==3.6.4";
+        copy ~from:`Context [ "requirements.txt" ] ~dst:"./";
+        run ~network:[ "host" ] "pip install --no-cache-dir -r requirements.txt";
+        run "whoami && ls -la . && mkdir ./inputs && mkdir ./data";
+        run "echo 'verbose=off' > /home/tmf/.wgetrc";
+        copy ~from:`Context [ "." ] ~dst:"./";
+      ]
+
+  let run ?label ?(args = []) ?script_path ?rom ?extra_files ?env ?network
+      ~builder snapshot =
+    Current_obuilder.run ?label builder ~snapshot ?rom ?extra_files ?env
+      ?network
       (String.concat " " (("python" :: Option.to_list script_path) @ args))
 end
 
 module Repos = struct
   let schedule = Current_cache.Schedule.v ~valid_for:(Duration.of_day 7) ()
 
-  let tmf_implementation () =
-    Git.clone ~gref:"main" ~schedule
+  let tmf_implementation gref =
+    Git.clone ~gref ~schedule
       "git@github.com:carboncredits/tmf-implementation.git"
 
   let tmf_data () =
@@ -66,16 +93,22 @@ let snapshots_to_rom
 let jrc ~builder img =
   Python.run ~builder
     ~label:"JRC"
-    (* Not sure if these env variables are actually used in this part? *)
-    ~env:[
-      "DATA_PATH", "./data";
-      "USER_PATH", "/home/tmf";
-      "EARTH_DATA_COOKIE_FILE", "./cookie";
-    ]
-    ~network:[ "host" ]
-    ~script_path:"./methods/inputs/download_jrc_data.py"
-    ~args:[ "./data/zip"; "./data/tif" ]
+      (* Not sure if these env variables are actually used in this part? *)
+    ~env:
+      [
+        ("DATA_PATH", "./data");
+        ("USER_PATH", "/home/tmf");
+        ("EARTH_DATA_COOKIE_FILE", "./cookie");
+      ]
+    ~network:[ "host" ] ~script_path:"./methods/inputs/download_jrc_data.py"
+    ~args:[ output_dir / "zip"; output_dir / "tif" ]
     img
+
+let label l t =
+  let open Current.Syntax in
+  Current.component "%s" l
+  |> let> v = t in
+     Current.Primitive.const v
 
 let evaluate ~project_name ~builder ~jrc ~config_img img =
   let python_run = Python.run ~builder in
@@ -85,18 +118,36 @@ let evaluate ~project_name ~builder ~jrc ~config_img img =
     in
     python_run ~rom ~label:"buffer"
       ~script_path:"./methods/inputs/generate_boundary.py"
-      ~args:[ "data/" ^ project_name; "data/output.geojson" ]
+      ~args:[ input_dir / project_name; output_dir / "output.geojson" ]
+      img
+  in
+  let luc =
+    let rom =
+      Current.list_seq
+        [
+          Current.map (fun v -> (wdir / "data", wdir, v)) buffer;
+          Current.map (fun v -> (wdir / "data", wdir, v)) jrc;
+        ]
+    in
+    python_run ~rom ~label:"LUC"
+      ~script_path:"./methods/inputs/generate_luc_layer.py"
+      ~args:
+        [
+          input_dir / "output.geojson";
+          input_dir / "tif/products/tmf_v1/AnnualChange";
+          output_dir / "luc.tif";
+        ]
       img
   in
   let carbon =
     let rom =
-      Current.list_seq [
-        Current.map (fun v -> (wdir / "data", wdir, v)) buffer;
-        Current.map (fun v -> (arkdir, wdir, v)) jrc 
-      ]
+      Current.list_seq
+        [
+          Current.map (fun v -> (wdir / "data", wdir, v)) buffer;
+          Current.map (fun v -> (wdir / "data", wdir, v)) luc;
+        ]
     in
-    python_run ~rom ~label:"carbon density (todo)"
-      ~script_path:"main.py"
+    python_run ~rom ~label:"carbon density (todo)" ~script_path:"main.py"
       ~args:[ "--method"; "additionality" ]
       img
   in
@@ -125,10 +176,12 @@ let evaluate ~project_name ~builder ~jrc ~config_img img =
           Current.map (fun v -> (wdir / "data", wdir, v)) leakage;
         ]
     in
-    python_run ~rom
-      ~label:("permanence " ^ String.lowercase_ascii project_name)
-      ~script_path:"main.py"
-      ~args:[ "--method"; "permanence" ]
-      img
+    Current.collapse ~key:"project" ~value:project_name
+      ~input:(label project_name img)
+    @@ python_run ~rom
+         ~label:("permanence " ^ String.lowercase_ascii project_name)
+         ~script_path:"main.py"
+         ~args:[ "--method"; "permanence" ]
+         img
   in
   Current.ignore_value permanence
