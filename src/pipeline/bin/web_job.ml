@@ -62,6 +62,20 @@ let link_obuilder_id s =
         (String.concat ~sep:"\"" rest)
   | _ -> s
 
+let rec last = function [] -> assert false | [ x ] -> x | _ :: xs -> last xs
+
+let find_final_build_result path =
+  match Bos.OS.File.read path with
+  | Error _ -> None
+  | Ok res -> (
+      match Astring.String.cuts ~sep:"saved as \"" res with
+      | [] -> None
+      | xs -> (
+          let s = last xs in
+          match Astring.String.cut ~sep:"\"" s with
+          | Some (id, _) -> Some id
+          | None -> None))
+
 let render ctx ~actions ~job_id ~log:path jobs =
   let _ansi = Ansi.create () in
   let action op = a_action (Fmt.str "/job/%s/%s" job_id op) in
@@ -77,6 +91,25 @@ let render ctx ~actions ~job_id ~log:path jobs =
             input ~a:[ a_name "csrf"; a_input_type `Hidden; a_value csrf ] ();
           ];
       ]
+  in
+  let zip_button =
+    match Current.Job.lookup_running job_id with
+    | Some _ -> []
+    | None -> (
+        (* Presumably the job is finished running at this point... *)
+        match find_final_build_result path with
+        | None -> []
+        | Some id ->
+            [
+              form
+                ~a:[ action (id ^ "/data.zip"); a_method `Post ]
+                [
+                  input ~a:[ a_input_type `Submit; a_value "Download data" ] ();
+                  input
+                    ~a:[ a_name "csrf"; a_input_type `Hidden; a_value csrf ]
+                    ();
+                ];
+            ])
   in
   let cancel_button =
     match Current.Job.lookup_running job_id with
@@ -141,8 +174,8 @@ let render ctx ~actions ~job_id ~log:path jobs =
   in
   let tmpl =
     Current_web.Context.template ctx
-      (line_numbers_js @ history @ rebuild_button @ cancel_button @ start_button
-     @ inputs
+      (line_numbers_js @ history @ zip_button @ rebuild_button @ cancel_button
+     @ start_button @ inputs
       @ [ pre [ txt sep ] ])
   in
   match String.cut ~sep tmpl with
@@ -222,6 +255,35 @@ let job ~engine ~job_id =
           Server.respond ~status:`OK ~headers ~body () >|= fun r -> `Response r
   end
 
+let with_file f fn =
+  Lwt_unix.openfile f [ Unix.O_RDWR; Unix.O_CREAT ] 0o644 >>= fun fd ->
+  Lwt.finalize (fun () -> fn (f, fd)) (fun () -> Lwt_unix.close fd)
+
+let download ~store ~id =
+  object
+    inherit Resource.t
+    val! can_post = `Builder
+
+    method! private post ctx _body =
+      let src_dir =
+        Fpath.(store / "result" / id / "rootfs" / "home" / "tmf" / "app")
+        |> Fpath.to_string
+      in
+      match Obuilder.Manifest.generate ~exclude:[] ~src_dir "data" with
+      | Error (`Msg m) ->
+          Context.respond_error ctx `Bad_request ("Failed data zip: " ^ m)
+      | Ok src_manifest ->
+          let fname = Filename.temp_file "tmf-" "" in
+          let tar =
+            with_file fname @@ fun (_, fd) ->
+            Obuilder.Tar_transfer.send_files ~src_dir
+              ~src_manifest:[ src_manifest ] ~dst_dir:"" ~to_untar:fd
+              ~user:(`Unix Obuilder_spec.{ uid = 1000; gid = 1000 })
+          in
+          tar >>= fun () ->
+          Server.respond_file ~fname () >|= fun r -> `Response r
+  end
+
 let rebuild ~engine ~job_id =
   object
     inherit Resource.t
@@ -271,7 +333,7 @@ let start ~job_id =
 
 let id ~date ~log = Fmt.str "%s/%s" date log
 
-let routes ~engine =
+let routes ~store ~engine =
   Routes.
     [
       ( (s "alt" / s "job" / str / str /? nil) @--> fun date log ->
@@ -282,4 +344,9 @@ let routes ~engine =
         cancel ~job_id:(id ~date ~log) );
       ( (s "alt" / s "job" / str / str / s "start" /? nil) @--> fun date log ->
         start ~job_id:(id ~date ~log) );
+      (* TODO: Fix URLs *)
+      ( (s "job" / str / str / str / s "data.zip" /? nil)
+      @--> fun _date _log id -> download ~store ~id );
+      ( (s "alt" / s "job" / str / str / str / s "data.zip" /? nil)
+      @--> fun _date _log id -> download ~store ~id );
     ]

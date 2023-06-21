@@ -140,7 +140,7 @@ let connect (Builder ((module B), b) : Current_obuilder.builder) id =
 
 module HMap = Hashtbl.Make (String)
 
-let static_routes ~engine builder custom_css =
+let static_routes ~engine ~store builder custom_css =
   [
     Routes.(
       (s "css" / s custom_css /? nil)
@@ -152,4 +152,4 @@ let static_routes ~engine builder custom_css =
     Routes.((s "terminal" / str /? nil) @--> terminal);
     Routes.((s "terminal" / str / s "connect" /? nil) @--> connect builder);
   ]
-  @ Web_job.routes ~engine
+  @ Web_job.routes ~store ~engine

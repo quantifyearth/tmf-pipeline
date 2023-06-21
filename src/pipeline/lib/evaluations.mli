@@ -4,8 +4,8 @@ module Current_gitfile = Current_gitfile
 module Repos : sig
   (** Useful 4C repositories *)
 
-  val tmf_implementation : unit -> Current_git.Commit.t Current.t
-  (** The TMF methodology implementation code *)
+  val tmf_implementation : string -> Current_git.Commit.t Current.t
+  (** The TMF methodology implementation code at [gref]. *)
 
   val tmf_data : unit -> Current_git.Commit.t Current.t
   (** The TMF data repository for projection configurations *)
@@ -14,6 +14,9 @@ end
 module Python : sig
   val spec : Obuilder_spec.t
   (** A python-geo OBuilder specification. *)
+
+  val spec_with_data_dir : Obuilder_spec.t
+  (** Like {! spec} but creates a data direction in the working directory *)
 end
 
 val data_spec : Obuilder_spec.t
