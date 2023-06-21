@@ -81,6 +81,7 @@ module Raw = struct
       timeout : Duration.t option;
       level : Current.Level.t option;
       builder : builder;
+      secrets : (string * string) list;
     }
 
     module Key = struct
@@ -181,7 +182,7 @@ module Raw = struct
           Current.Job.log job "%a@." Fmt.(styled (`Fg `Yellow) string) msg
       | `Output -> Current.Job.log job "%s@." msg
 
-    let build { builder; timeout; pool; level } (job : Current.Job.t)
+    let build { builder; timeout; pool; level; secrets } (job : Current.Job.t)
         (k : Key.t) : Value.t Current.or_error Lwt.t =
       let open Lwt.Infix in
       let (Builder ((module B), builder)) = builder in
@@ -189,8 +190,8 @@ module Raw = struct
       Current.Job.start ?timeout ?pool job ~level >>= fun () ->
       with_context ~job k.source @@ fun dir ->
       let ctx =
-        Obuilder.Context.v ~src_dir:(Fpath.to_string dir) ~log:(job_logger job)
-          ()
+        Obuilder.Context.v ~secrets ~src_dir:(Fpath.to_string dir)
+          ~log:(job_logger job) ()
       in
       Current.Job.log job "Obuilder spec(%s): %a"
         (Digest.to_hex @@ Digest.string @@ Key.digest k)
@@ -206,10 +207,10 @@ module Raw = struct
 
   module BuildC = Current_cache.Make (Build)
 
-  let build ?pool ?timeout ?level ?schedule ?(extra_files = []) builder spec
-      source =
+  let build ?pool ?timeout ?level ?schedule ?(extra_files = []) ?(secrets = [])
+      builder spec source =
     let key = Build.Key.{ spec; source; extra_files } in
-    let ctx = Build.{ pool; timeout; level; builder } in
+    let ctx = Build.{ pool; timeout; level; builder; secrets } in
     BuildC.get ?schedule ctx key
 
   module Read = struct
@@ -287,7 +288,7 @@ let build ?level ?schedule ?label ?pool spec builder src =
 let run ?level ?schedule ?label ?pool builder
     ?(rom : (string * string * Raw.Build.Value.t) list Current.t option)
     ?(extra_files : Extra_files.file list Current.t option) ?(env = []) ?network
-    ~snapshot cmd =
+    ?secrets ?ctx_secrets ~snapshot cmd =
   let open Current.Syntax in
   Current.component "run%a" pp_sp_label label
   |> let> (snapshot : Raw.Build.Value.t) = snapshot
@@ -319,10 +320,10 @@ let run ?level ?schedule ?label ?pool builder
      let spec =
        Obuilder_spec.stage ~child_builds:spec.child_builds ~from:spec.from
          (spec.ops @ env @ symlinks
-         @ [ Obuilder_spec.run ?network ~rom "%s" cmd ])
+         @ [ Obuilder_spec.run ?network ?secrets ~rom "%s" cmd ])
      in
-     Raw.build ?pool ?level ?schedule ?extra_files builder spec
-       snapshot.ctx.source
+     Raw.build ?pool ?level ?schedule ?extra_files ?secrets:ctx_secrets builder
+       spec snapshot.ctx.source
 
 let contents ?level ?schedule ?label ?pool ~snapshot store files =
   let open Current.Syntax in

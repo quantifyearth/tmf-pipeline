@@ -39,6 +39,7 @@ val evaluate :
   project_name:string ->
   builder:Current_obuilder.builder ->
   jrc:Current_obuilder.Raw.Build.Value.t Current.t ->
+  gedi_base_img:Current_obuilder.Raw.Build.Value.t Current.t ->
   config_img:Current_obuilder.Raw.Build.Value.t Current.t ->
   Current_obuilder.Raw.Build.Value.t Current.t ->
   unit Current.t
