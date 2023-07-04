@@ -105,6 +105,34 @@ let jrc ~builder img =
     ~args:[ output_dir / "zip"; output_dir / "tif" ]
     img
 
+let ecoregions ~builder img =
+  Python.run ~builder ~ctx_secrets:""
+    ~label:"ecoregions"
+      (* Not sure if these env variables are actually used in this part? *)
+    ~env:
+      [
+        ("DATA_PATH", "./data");
+        ("USER_PATH", "/home/tmf");
+        ("EARTH_DATA_COOKIE_FILE", "./cookie");
+      ]
+    ~network:[ "host" ] ~script_path:"./methods/inputs/download_shapefiles.py"
+    ~args:[ "ecoregion"; output_dir / "ecoregions.geojson" ]
+    img
+
+let countries ~builder img =
+  Python.run ~builder ~ctx_secrets:""
+    ~label:"countries"
+      (* Not sure if these env variables are actually used in this part? *)
+    ~env:
+      [
+        ("DATA_PATH", "./data");
+        ("USER_PATH", "/home/tmf");
+        ("EARTH_DATA_COOKIE_FILE", "./cookie");
+      ]
+    ~network:[ "host" ] ~script_path:"./methods/inputs/download_shapefiles.py"
+    ~args:[ "country"; output_dir / "countries.geojson" ]
+    img
+
 let label l t =
   let open Current.Syntax in
   Current.component "%s" l
@@ -117,6 +145,8 @@ let evaluate ~project_name ~builder ~jrc ~gedi_base_img ~config_img img =
   let ctx_secrets =
     Bos.OS.File.read (Fpath.v "./secrets/.env") |> Result.get_ok
   in
+  let eco = ecoregions ~builder gedi_base_img in
+  let country = countries ~builder gedi_base_img in
   let python_run = Python.run ~ctx_secrets ~builder in
   let buffer =
     let rom =
@@ -165,6 +195,8 @@ let evaluate ~project_name ~builder ~jrc ~gedi_base_img ~config_img img =
           Current.map (fun v -> (wdir / "data", wdir, v)) buffer;
           Current.map (fun v -> (wdir / "data", wdir, v)) luc;
           Current.map (fun v -> (wdir / "data", wdir, v)) gedi;
+          Current.map (fun v -> (wdir / "data", wdir, v)) eco;
+          Current.map (fun v -> (wdir / "data", wdir, v)) country;
         ]
     in
     python_run ~rom ~label:"carbon density (todo)" ~script_path:"main.py"
@@ -183,7 +215,7 @@ let evaluate ~project_name ~builder ~jrc ~gedi_base_img ~config_img img =
   let leakage =
     let rom =
       Current.list_seq
-        [ Current.map (fun v -> (wdir / "data", wdir, v)) buffer ]
+        [ Current.map (fun v -> (wdir / "data", wdir, v)) carbon ]
     in
     python_run ~rom ~label:"leakage" ~script_path:"main.py"
       ~args:[ "--method"; "leakage" ] img

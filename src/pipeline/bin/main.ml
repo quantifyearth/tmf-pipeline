@@ -56,7 +56,7 @@ let pipeline ?auth _token _config _store builder engine_config slack =
     in
     let tmf_gedi =
       Evaluations.Repos.tmf_implementation
-        "c4768217195dd31e4a2fccd31e1a21cef09708cb"
+        "f23fe701086f7b7465b57628e41ce2c01dbaaac4"
     in
     let data = Evaluations.Repos.tmf_data () in
     let _scc_values = Current_gitfile.directory_contents data (Fpath.v "scc") in
@@ -79,8 +79,8 @@ let pipeline ?auth _token _config _store builder engine_config slack =
         (`Git tmf_jrc)
     in
     let gedi_input =
-      Current_obuilder.build ~label:"gedi" Evaluations.Python.spec builder
-        (`Git tmf_gedi)
+      Current_obuilder.build ~label:"gedi" Evaluations.Python.spec_with_data_dir
+        builder (`Git tmf_gedi)
     in
     let jrc = Evaluations.jrc ~builder jrc_input in
     let others =

@@ -35,6 +35,18 @@ val jrc :
   Current_obuilder.Raw.Build.Value.t Current.t
 (** [jrc ~builder base] downloads JRC data into a container. *)
 
+val ecoregions :
+  builder:Current_obuilder.builder ->
+  Current_obuilder.Raw.Build.Value.t Current.t ->
+  Current_obuilder.Raw.Build.Value.t Current.t
+(** Downloads ecoregion data into a container. *)
+
+val countries :
+  builder:Current_obuilder.builder ->
+  Current_obuilder.Raw.Build.Value.t Current.t ->
+  Current_obuilder.Raw.Build.Value.t Current.t
+(** Downloads country data into a container. *)
+
 val evaluate :
   project_name:string ->
   builder:Current_obuilder.builder ->
