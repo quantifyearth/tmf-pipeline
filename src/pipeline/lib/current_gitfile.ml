@@ -68,6 +68,69 @@ module Raw = struct
       Lwt.return contents
   end
 
+  module Git_dir_contents = struct
+    type t = No_context
+
+    let auto_cancel = true
+    let id = "git-file"
+
+    module Key = struct
+      type t = { commit : Git.Commit.t; directory : Fpath.t }
+
+      let to_json t =
+        `Assoc
+          [
+            ("commit", `String (Git.Commit.hash t.commit));
+            ("directory", `String (Fpath.to_string t.directory));
+          ]
+
+      let digest t = to_json t |> Yojson.Safe.to_string
+    end
+
+    let pp ppf t = Yojson.pp ppf (Key.to_json t)
+
+    module Value = struct
+      type t = (Fpath.t * string) list
+
+      let marshal ts =
+        `List
+          (List.map
+             (fun (p, v) -> `List [ `String (Fpath.to_string p); `String v ])
+             ts)
+        |> Yojson.Safe.to_string
+
+      let unmarshal s =
+        match Yojson.Safe.from_string s with
+        | `List lst ->
+            List.map
+              (function
+                | `List [ `String p; `String c ] ->
+                    let f = Fpath.of_string p |> or_raise in
+                    (f, c)
+                | _ -> failwith "Failed to unmarshal files")
+              lst
+        | _ -> failwith "Failed to unmarshal files"
+    end
+
+    let or_raise = function Ok v -> v | Error (`Msg m) -> failwith m
+
+    let build No_context (job : Current.Job.t) (k : Key.t) :
+        Value.t Current.or_error Lwt.t =
+      Current.Job.start ~level:Harmless job >>= fun () ->
+      Current_git.with_checkout ~job k.commit @@ fun dir ->
+      Lwt.return @@ Bos.OS.Dir.contents Fpath.(dir // k.directory)
+      >>!= fun paths ->
+      let contents =
+        try
+          Ok
+            (List.map
+               (fun path -> (path, Bos.OS.File.read path |> or_raise))
+               paths)
+        with Failure msg -> Error (`Msg msg)
+      in
+      Lwt.return contents
+  end
+
   module Git_dir = struct
     type t = No_context
 
@@ -170,10 +233,15 @@ module Raw = struct
 end
 
 module GitFileC = Current_cache.Make (Raw.Git_file)
+module GitDirC = Current_cache.Make (Raw.Git_dir_contents)
 
 let raw_git_file ?schedule commit files =
   let key = Raw.Git_file.Key.{ commit; files } in
   GitFileC.get ?schedule No_context key
+
+let raw_git_dir ?schedule commit directory =
+  let key = Raw.Git_dir_contents.Key.{ commit; directory } in
+  GitDirC.get ?schedule No_context key
 
 let contents ?schedule commit files =
   let open Current.Syntax in
@@ -181,13 +249,19 @@ let contents ?schedule commit files =
   |> let> commit = commit in
      raw_git_file ?schedule commit files
 
-module GitDirC = Current_cache.Make (Raw.Git_dir)
+let directory_contents ?schedule commit directory =
+  let open Current.Syntax in
+  Current.component "read %a" Fpath.pp directory
+  |> let> commit = commit in
+     raw_git_dir ?schedule commit directory
+
+module GitDirectoryC = Current_cache.Make (Raw.Git_dir)
 
 let raw_git_dir ?schedule commit dir =
   let key = Raw.Git_dir.Key.{ commit; dir } in
-  GitDirC.get ?schedule No_context key
+  GitDirectoryC.get ?schedule No_context key
 
-let directory_contents ?schedule commit dir =
+let directory ?schedule commit dir =
   let open Current.Syntax in
   Current.component "directory %a" Fpath.pp dir
   |> let> commit = commit in

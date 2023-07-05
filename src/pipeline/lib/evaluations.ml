@@ -4,6 +4,7 @@ module Git = Current_git
 module Github = Current_github
 module Current_obuilder = Current_obuilder
 module Current_gitfile = Current_gitfile
+module Config = Config
 
 let arkdir = "/inputs"
 let wdir = "/home/tmf/app"
@@ -63,12 +64,14 @@ module Python = struct
         copy ~from:`Context [ "." ] ~dst:"./";
       ]
 
-  let run ?label ?(args = []) ?script_path ?rom ?extra_files ?env ?network
-      ?secrets ~ctx_secrets ~builder snapshot =
+  let run ?label ?(args = []) ?(pre = []) ?pre_symlinks ?script_path ?rom
+      ?extra_files ?env ?network ?secrets ~ctx_secrets ~builder snapshot =
     let ctx_secrets = [ ("earthdata", ctx_secrets) ] in
     Current_obuilder.run ?label builder ~snapshot ?rom ?extra_files ?env
-      ?secrets ~ctx_secrets ?network
-      (String.concat " " (("python" :: Option.to_list script_path) @ args))
+      ?secrets ~ctx_secrets ?network ?pre_symlinks
+      (pre
+      @ [ String.concat " " (("python" :: Option.to_list script_path) @ args) ]
+      )
 end
 
 module Repos = struct
@@ -139,7 +142,8 @@ let label l t =
   |> let> v = t in
      Current.Primitive.const v
 
-let evaluate ~project_name ~builder ~jrc ~gedi_base_img ~config_img img =
+let evaluate ~project_name ~builder ~jrc ~gedi_base_img ~config_img img
+    (project_config : Config.t) =
   (* TODO: Move this out of the pipeline and in general provide a generic way
      to handle secrets. *)
   let ctx_secrets =
@@ -203,10 +207,46 @@ let evaluate ~project_name ~builder ~jrc ~gedi_base_img ~config_img img =
       ~args:[ "--method"; "additionality" ]
       img
   in
+  let other_projects =
+    Current_obuilder.run ~label:"other projects"
+      ~shell:[ Obuilder_spec.shell [ "/bin/sh"; "-c" ] ]
+      ~snapshot:config_img builder
+      [ "rm /inputs/" ^ project_name ]
+  in
+  let matching_area =
+    (* Requires project shapefile, country code, country shapefile, ecoregions shapefile, other projects and output *)
+    let rom =
+      Current.list_seq
+        [
+          Current.map (fun v -> (arkdir, wdir, v)) config_img;
+          Current.map (fun v -> (arkdir, wdir / "projects", v)) other_projects;
+          Current.map (fun v -> (wdir / "data", wdir, v)) country;
+          Current.map (fun v -> (wdir / "data", wdir, v)) eco;
+        ]
+    in
+    python_run ~rom ~label:"matching area"
+      ~script_path:"./methods/inputs/generate_matching_area.py"
+      ~env:[ ("PYTHONPATH", wdir ^ ":$PYTHONPATH") ]
+      ~pre_symlinks:
+        [ Obuilder_spec.run "mkdir projects && mkdir projects/inputs" ]
+      ~args:
+        [
+          input_dir / project_name;
+          project_config.country_code;
+          input_dir / "countries.geojson";
+          input_dir / "ecoregions.geojson";
+          "projects" / "inputs";
+          (output_dir / project_name) ^ "-matches.geojson";
+        ]
+      gedi_base_img
+  in
   let additionality =
     let rom =
       Current.list_seq
-        [ Current.map (fun v -> (wdir / "data", wdir, v)) carbon ]
+        [
+          Current.map (fun v -> (wdir / "data", wdir, v)) carbon;
+          Current.map (fun v -> (wdir / "data", wdir, v)) matching_area;
+        ]
     in
     python_run ~rom ~label:"additionality" ~script_path:"main.py"
       ~args:[ "--method"; "additionality" ]

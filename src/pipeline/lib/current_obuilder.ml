@@ -287,8 +287,8 @@ let build ?level ?schedule ?label ?pool spec builder src =
 
 let run ?level ?schedule ?label ?pool builder
     ?(rom : (string * string * Raw.Build.Value.t) list Current.t option)
-    ?(extra_files : Extra_files.file list Current.t option) ?(env = []) ?network
-    ?secrets ?ctx_secrets ~snapshot cmd =
+    ?(pre_symlinks = []) ?(extra_files : Extra_files.file list Current.t option)
+    ?(env = []) ?network ?(shell = []) ?secrets ?ctx_secrets ~snapshot cmds =
   let open Current.Syntax in
   Current.component "run%a" pp_sp_label label
   |> let> (snapshot : Raw.Build.Value.t) = snapshot
@@ -319,8 +319,8 @@ let run ?level ?schedule ?label ?pool builder
      in
      let spec =
        Obuilder_spec.stage ~child_builds:spec.child_builds ~from:spec.from
-         (spec.ops @ env @ symlinks
-         @ [ Obuilder_spec.run ?network ?secrets ~rom "%s" cmd ])
+         (spec.ops @ env @ pre_symlinks @ symlinks @ shell
+         @ List.map (Obuilder_spec.run ?network ?secrets ~rom "%s") cmds)
      in
      Raw.build ?pool ?level ?schedule ?extra_files ?secrets:ctx_secrets builder
        spec snapshot.ctx.source
