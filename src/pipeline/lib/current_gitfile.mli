@@ -47,6 +47,14 @@ val directory_contents :
   ?schedule:Current_cache.Schedule.t ->
   Current_git.Commit.t Current.term ->
   Fpath.t ->
+  Raw.Git_file.Value.t Current.term
+(** [directory_contents git dir] returns each of the files (without recursing) in [dir] and the
+    contents of each of the files. *)
+
+val directory :
+  ?schedule:Current_cache.Schedule.t ->
+  Current_git.Commit.t Current.term ->
+  Fpath.t ->
   Raw.Git_dir.Value.t Current.term
-(** [directory_contents git dir] returns each of the files (without recursing) in [dir] along
+(** [directory git dir] returns each of the files (without recursing) in [dir] along
     with the cumulative digest of the directory. *)

@@ -40,6 +40,17 @@ let read_channel_uri path =
 
 module Current_obuilder = Evaluations.Current_obuilder
 
+let combine_projects_and_configuration projects config =
+  let find_project (config : Evaluations.Config.t) projects =
+    let find project =
+      let fname = Fpath.basename project |> Filename.chop_extension in
+      String.equal (string_of_int config.vcs_id) fname
+    in
+    let project = List.find_opt find projects in
+    Option.map (fun p -> (p, config)) project
+  in
+  find_project config projects
+
 let pipeline ?auth _token _config _store builder engine_config slack =
   let open Current.Syntax in
   let _channel = Some (read_channel_uri slack) in
@@ -54,14 +65,26 @@ let pipeline ?auth _token _config _store builder engine_config slack =
       Evaluations.Repos.tmf_implementation
         "a376fc3b8be67c31c98261dff618311de9df4209"
     in
+    (* We use this for pixel matching too for now. *)
     let tmf_gedi =
       Evaluations.Repos.tmf_implementation
-        "f23fe701086f7b7465b57628e41ce2c01dbaaac4"
+        "d7f9ad300348cf99aff149e1f33993ae9a9a04ac"
     in
     let data = Evaluations.Repos.tmf_data () in
-    let _scc_values = Current_gitfile.directory_contents data (Fpath.v "scc") in
-    let projects_dir =
-      Current_gitfile.directory_contents data (Fpath.v "projects")
+    let _scc_values = Current_gitfile.directory data (Fpath.v "scc") in
+    let projects_dir = Current_gitfile.directory data (Fpath.v "projects") in
+    let configurations =
+      let+ configs =
+        Current_gitfile.directory_contents data (Fpath.v "configurations")
+      and+ projects = projects_dir in
+      let map_config (_, c) =
+        match Evaluations.Config.of_yojson (Yojson.Safe.from_string c) with
+        | Error m ->
+            Logs.err (fun f -> f "Error: %s (%s)" m c);
+            None
+        | Ok c -> combine_projects_and_configuration projects.files c
+      in
+      List.filter_map map_config configs
     in
     (* HACK:
        Currently all of our python code lives in the same repository which means every time
@@ -85,19 +108,20 @@ let pipeline ?auth _token _config _store builder engine_config slack =
     let jrc = Evaluations.jrc ~builder jrc_input in
     let others =
       Current.component "Evaluate Projects"
-      |> let** projects_dir = projects_dir in
+      |> let** projects_dir = projects_dir
+         and* configurations = configurations in
          let config_img =
            Current_obuilder.build ~label:"config" Evaluations.data_spec builder
              (`Dir projects_dir.dir)
          in
          (* TODO: Make this a parameter so we can run the pipeline but not for ALL projects. *)
-         let projects = List.filteri (fun i _ -> i < 2) projects_dir.files in
+         let projects = configurations in
          let evals =
            List.map
-             (fun project_name ->
+             (fun (project_name, project_config) ->
                Evaluations.evaluate ~jrc ~config_img ~gedi_base_img:gedi_input
                  ~project_name:(Fpath.filename project_name)
-                 ~builder img)
+                 ~builder img project_config)
              projects
          in
          Current.all evals

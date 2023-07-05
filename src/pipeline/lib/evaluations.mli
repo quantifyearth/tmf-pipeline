@@ -1,5 +1,6 @@
 module Current_obuilder = Current_obuilder
 module Current_gitfile = Current_gitfile
+module Config = Config
 
 module Repos : sig
   (** Useful 4C repositories *)
@@ -54,6 +55,7 @@ val evaluate :
   gedi_base_img:Current_obuilder.Raw.Build.Value.t Current.t ->
   config_img:Current_obuilder.Raw.Build.Value.t Current.t ->
   Current_obuilder.Raw.Build.Value.t Current.t ->
+  Config.t ->
   unit Current.t
 (** The evaluation pipeline for a particular project. The [config_img] contains the
       configuration file in an OBuilder image and the final build argument contains the
