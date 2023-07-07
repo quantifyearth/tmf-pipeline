@@ -199,12 +199,28 @@ let evaluate ~project_name ~builder ~jrc ~gedi_base_img ~config_img img
           Current.map (fun v -> (wdir / "data", wdir, v)) buffer;
           Current.map (fun v -> (wdir / "data", wdir, v)) luc;
           Current.map (fun v -> (wdir / "data", wdir, v)) gedi;
-          Current.map (fun v -> (wdir / "data", wdir, v)) eco;
-          Current.map (fun v -> (wdir / "data", wdir, v)) country;
+          (* Not needed, remove once GEDI is used elsewhere *)
         ]
     in
-    python_run ~rom ~label:"carbon density (todo)" ~script_path:"main.py"
-      ~args:[ "--method"; "additionality" ]
+    python_run ~rom ~label:"carbon density"
+      ~script_path:"./methods/inputs/generate_carbon_density.py"
+      ~env:
+        [
+          ("DATA_PATH", "./data");
+          ("USER_PATH", "/home/tmf");
+          ("DB_HOST", "aello");
+          ("DB_USER", "sherwood");
+          ("DB_NAME", "postgres");
+          ("EARTH_DATA_COOKIE_FILE", "./cookie");
+        ]
+        (* Needs host network for DB conneciton *)
+      ~network:[ "host" ]
+      ~args:
+        [
+          input_dir / "output.geojson";
+          input_dir / "luc.tif";
+          output_dir / "carbon.csv";
+        ]
       img
   in
   let other_projects =
