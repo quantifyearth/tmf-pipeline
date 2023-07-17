@@ -31,24 +31,29 @@ val snapshots_to_rom :
     read-only mount description for OBuilder. *)
 
 val jrc :
+  pool:unit Current.Pool.t ->
   builder:Current_obuilder.builder ->
   Current_obuilder.Raw.Build.Value.t Current.t ->
   Current_obuilder.Raw.Build.Value.t Current.t
 (** [jrc ~builder base] downloads JRC data into a container. *)
 
 val ecoregions :
+  pool:unit Current.Pool.t ->
   builder:Current_obuilder.builder ->
+  jrc:Current_obuilder.Raw.Build.Value.t Current.t ->
   Current_obuilder.Raw.Build.Value.t Current.t ->
   Current_obuilder.Raw.Build.Value.t Current.t
 (** Downloads ecoregion data into a container. *)
 
 val countries :
+  pool:unit Current.Pool.t ->
   builder:Current_obuilder.builder ->
   Current_obuilder.Raw.Build.Value.t Current.t ->
   Current_obuilder.Raw.Build.Value.t Current.t
 (** Downloads country data into a container. *)
 
 val evaluate :
+  pool:unit Current.Pool.t ->
   project_name:string ->
   builder:Current_obuilder.builder ->
   jrc:Current_obuilder.Raw.Build.Value.t Current.t ->

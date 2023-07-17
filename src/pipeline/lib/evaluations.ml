@@ -94,8 +94,8 @@ let snapshots_to_rom
       Obuilder_spec.Rom.of_build ~hash:snap.snapshot ~build_dir target)
     lst
 
-let jrc ~builder img =
-  Python.run ~builder ~ctx_secrets:""
+let jrc ~pool ~builder img =
+  Python.run ~pool ~builder ~ctx_secrets:""
     ~label:"JRC"
       (* Not sure if these env variables are actually used in this part? *)
     ~env:
@@ -108,9 +108,33 @@ let jrc ~builder img =
     ~args:[ output_dir / "zip"; output_dir / "tif" ]
     img
 
-let ecoregions ~builder img =
-  Python.run ~builder ~ctx_secrets:""
-    ~label:"ecoregions"
+let accessibility_fname = "accessibility.tif"
+
+let accessibility ~pool ~builder ~jrc img =
+  let download =
+    Python.run ~pool ~builder ~ctx_secrets:""
+      ~label:"accessibility"
+        (* Not sure if these env variables are actually used in this part? *)
+      ~env:
+        [
+          ("DATA_PATH", "./data");
+          ("USER_PATH", "/home/tmf");
+          ("EARTH_DATA_COOKIE_FILE", "./cookie");
+        ]
+      ~network:[ "host" ]
+      ~script_path:"./methods/inputs/download_accessibility.py"
+      ~args:[ output_dir / accessibility_fname ]
+      img
+  in
+  let rom =
+    Current.list_seq
+      [
+        Current.map (fun v -> (wdir / "data", wdir, v)) download;
+        Current.map (fun v -> (wdir / "data", wdir, v)) jrc;
+      ]
+  in
+  Python.run ~pool ~builder ~ctx_secrets:"" ~rom
+    ~label:"accessibility tiles"
       (* Not sure if these env variables are actually used in this part? *)
     ~env:
       [
@@ -118,12 +142,92 @@ let ecoregions ~builder img =
         ("USER_PATH", "/home/tmf");
         ("EARTH_DATA_COOKIE_FILE", "./cookie");
       ]
-    ~network:[ "host" ] ~script_path:"./methods/inputs/download_shapefiles.py"
-    ~args:[ "ecoregion"; output_dir / "ecoregions.geojson" ]
+    ~network:[ "host" ] ~script_path:"./methods/inputs/generate_access_tiles.py"
+    ~args:
+      [
+        input_dir / accessibility_fname;
+        input_dir / "tif/products/tmf_v1/AnnualChange";
+        output_dir / "accessibility_tiles";
+      ]
     img
 
-let countries ~builder img =
-  Python.run ~builder ~ctx_secrets:""
+let srtm_zip_dir = "srtm_zip"
+let srtm_tif_dir = "srtm_tif"
+
+let srtm_elevation ~pool ~builder ~project_name ~boundaries
+    ~pixel_matching_boundaries img =
+  let rom =
+    Current.list_seq
+      [
+        Current.map (fun v -> (wdir / "data", wdir, v)) boundaries;
+        Current.map
+          (fun v -> (wdir / "data", wdir, v))
+          pixel_matching_boundaries;
+      ]
+  in
+  Python.run ~pool ~builder ~ctx_secrets:"" ~rom
+    ~label:"srtm elev."
+      (* Not sure if these env variables are actually used in this part? *)
+    ~env:
+      [
+        ("DATA_PATH", "./data");
+        ("USER_PATH", "/home/tmf");
+        ("EARTH_DATA_COOKIE_FILE", "./cookie");
+      ]
+    ~network:[ "host" ] ~script_path:"./methods/inputs/download_srtm_data.py"
+    ~args:
+      [
+        input_dir / project_name;
+        (input_dir / project_name) ^ "-matches.geojson";
+        output_dir / srtm_zip_dir;
+        output_dir / srtm_tif_dir;
+      ]
+    img
+
+let ecoregions ~pool ~builder ~jrc img =
+  let ecoregions_download =
+    Python.run ~pool ~builder ~ctx_secrets:""
+      ~label:"ecoregions [v]"
+        (* Not sure if these env variables are actually used in this part? *)
+      ~env:
+        [
+          ("DATA_PATH", "./data");
+          ("USER_PATH", "/home/tmf");
+          ("EARTH_DATA_COOKIE_FILE", "./cookie");
+        ]
+      ~network:[ "host" ] ~script_path:"./methods/inputs/download_shapefiles.py"
+      ~args:[ "ecoregion"; output_dir / "ecoregions.geojson" ]
+      img
+  in
+  let rom =
+    Current.list_seq
+      [
+        Current.map (fun v -> (wdir / "data", wdir, v)) ecoregions_download;
+        Current.map (fun v -> (wdir / "data", wdir, v)) jrc;
+      ]
+  in
+  Python.run ~pool ~builder ~ctx_secrets:""
+    ~label:"ecoregions"
+      (* Not sure if these env variables are actually used in this part? *)
+    ~rom
+    ~env:
+      [
+        ("DATA_PATH", "./data");
+        ("USER_PATH", "/home/tmf");
+        ("EARTH_DATA_COOKIE_FILE", "./cookie");
+      ]
+    ~network:[ "host" ]
+    ~script_path:"./methods/inputs/generate_ecoregion_rasters.py"
+    ~args:
+      [
+        input_dir / "ecoregions.geojson";
+        input_dir / "tif/products/tmf_v1/AnnualChange";
+        output_dir / "ecoregions.tif";
+      ]
+    img
+
+let countries ~pool ~builder img =
+  Python.run ~pool ~builder ~ctx_secrets:""
     ~label:"countries"
       (* Not sure if these env variables are actually used in this part? *)
     ~env:
@@ -142,21 +246,23 @@ let label l t =
   |> let> v = t in
      Current.Primitive.const v
 
-let evaluate ~project_name ~builder ~jrc ~gedi_base_img ~config_img img
+let evaluate ~pool ~project_name ~builder ~jrc ~gedi_base_img ~config_img img
     (project_config : Config.t) =
   (* TODO: Move this out of the pipeline and in general provide a generic way
      to handle secrets. *)
   let ctx_secrets =
     Bos.OS.File.read (Fpath.v "./secrets/.env") |> Result.get_ok
   in
-  let eco = ecoregions ~builder gedi_base_img in
-  let country = countries ~builder gedi_base_img in
-  let python_run = Python.run ~ctx_secrets ~builder in
+  let eco = ecoregions ~pool ~builder ~jrc gedi_base_img in
+  let country = countries ~pool ~builder gedi_base_img in
+  let access = accessibility ~pool ~builder ~jrc gedi_base_img in
+  let python_run = Python.run ~pool ~ctx_secrets ~builder in
   let buffer =
     let rom =
       Current.list_seq [ Current.map (fun v -> (arkdir, wdir, v)) config_img ]
     in
     python_run ~rom ~label:"buffer"
+      ~env:[ ("PYTHONPATH", wdir ^ ":$PYTHONPATH") ]
       ~script_path:"./methods/inputs/generate_boundary.py"
       ~args:[ input_dir / project_name; output_dir / "output.geojson" ]
       img
@@ -209,8 +315,8 @@ let evaluate ~project_name ~builder ~jrc ~gedi_base_img ~config_img img
           ("DATA_PATH", "./data");
           ("USER_PATH", "/home/tmf");
           ("DB_HOST", "aello");
-          ("DB_USER", "sherwood");
-          ("DB_NAME", "postgres");
+          ("DB_USER", "tmf_reader");
+          ("DB_NAME", "tmf_gedi");
           ("EARTH_DATA_COOKIE_FILE", "./cookie");
         ]
         (* Needs host network for DB conneciton *)
@@ -224,7 +330,7 @@ let evaluate ~project_name ~builder ~jrc ~gedi_base_img ~config_img img
       img
   in
   let other_projects =
-    Current_obuilder.run ~label:"other projects"
+    Current_obuilder.run ~pool ~label:"other projects"
       ~shell:[ Obuilder_spec.shell [ "/bin/sh"; "-c" ] ]
       ~snapshot:config_img builder
       [ "rm /inputs/" ^ project_name ]
@@ -238,6 +344,7 @@ let evaluate ~project_name ~builder ~jrc ~gedi_base_img ~config_img img
           Current.map (fun v -> (arkdir, wdir / "projects", v)) other_projects;
           Current.map (fun v -> (wdir / "data", wdir, v)) country;
           Current.map (fun v -> (wdir / "data", wdir, v)) eco;
+          Current.map (fun v -> (wdir / "data", wdir, v)) access;
         ]
     in
     python_run ~rom ~label:"matching area"
@@ -256,12 +363,17 @@ let evaluate ~project_name ~builder ~jrc ~gedi_base_img ~config_img img
         ]
       gedi_base_img
   in
+  let elev =
+    srtm_elevation ~pool ~builder ~project_name ~boundaries:config_img
+      ~pixel_matching_boundaries:matching_area gedi_base_img
+  in
   let additionality =
     let rom =
       Current.list_seq
         [
           Current.map (fun v -> (wdir / "data", wdir, v)) carbon;
           Current.map (fun v -> (wdir / "data", wdir, v)) matching_area;
+          Current.map (fun v -> (wdir / "data", wdir, v)) elev;
         ]
     in
     python_run ~rom ~label:"additionality" ~script_path:"main.py"

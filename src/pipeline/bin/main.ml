@@ -68,8 +68,10 @@ let pipeline ?auth _token _config _store builder engine_config slack =
     (* We use this for pixel matching too for now. *)
     let tmf_gedi =
       Evaluations.Repos.tmf_implementation
-        "d7f9ad300348cf99aff149e1f33993ae9a9a04ac"
+        "0cd3c35856af21892c0e2fbdf048089afbd045e1"
     in
+    (* Control the number of obuilder jobs that can run in parallel *)
+    let pool = Current.Pool.create ~label:"obuilder" 3 in
     let data = Evaluations.Repos.tmf_data () in
     let _scc_values = Current_gitfile.directory data (Fpath.v "scc") in
     let projects_dir = Current_gitfile.directory data (Fpath.v "projects") in
@@ -94,32 +96,33 @@ let pipeline ?auth _token _config _store builder engine_config slack =
        track `main` whereas the data inputs will be pinned to specific commits.
     *)
     let img =
-      Current_obuilder.build ~label:"tmf" Evaluations.Python.spec_with_data_dir
-        builder (`Git tmf_main)
+      Current_obuilder.build ~pool ~label:"tmf"
+        Evaluations.Python.spec_with_data_dir builder (`Git tmf_main)
     in
     let jrc_input =
-      Current_obuilder.build ~label:"jrc" Evaluations.Python.spec builder
+      Current_obuilder.build ~pool ~label:"jrc" Evaluations.Python.spec builder
         (`Git tmf_jrc)
     in
     let gedi_input =
-      Current_obuilder.build ~label:"gedi" Evaluations.Python.spec_with_data_dir
-        builder (`Git tmf_gedi)
+      Current_obuilder.build ~pool ~label:"gedi"
+        Evaluations.Python.spec_with_data_dir builder (`Git tmf_gedi)
     in
-    let jrc = Evaluations.jrc ~builder jrc_input in
+    let jrc = Evaluations.jrc ~pool ~builder jrc_input in
     let others =
       Current.component "Evaluate Projects"
       |> let** projects_dir = projects_dir
          and* configurations = configurations in
          let config_img =
-           Current_obuilder.build ~label:"config" Evaluations.data_spec builder
-             (`Dir projects_dir.dir)
+           Current_obuilder.build ~pool ~label:"config" Evaluations.data_spec
+             builder (`Dir projects_dir.dir)
          in
          (* TODO: Make this a parameter so we can run the pipeline but not for ALL projects. *)
          let projects = configurations in
          let evals =
            List.map
              (fun (project_name, project_config) ->
-               Evaluations.evaluate ~jrc ~config_img ~gedi_base_img:gedi_input
+               Evaluations.evaluate ~pool ~jrc ~config_img
+                 ~gedi_base_img:gedi_input
                  ~project_name:(Fpath.filename project_name)
                  ~builder img project_config)
              projects
