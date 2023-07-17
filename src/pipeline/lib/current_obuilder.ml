@@ -77,7 +77,7 @@ end
 module Raw = struct
   module Build = struct
     type t = {
-      pool : unit Current.Pool.t option;
+      pool : unit Current.Pool.t;
       timeout : Duration.t option;
       level : Current.Level.t option;
       builder : builder;
@@ -187,7 +187,7 @@ module Raw = struct
       let open Lwt.Infix in
       let (Builder ((module B), builder)) = builder in
       let level = Option.value level ~default:Current.Level.Average in
-      Current.Job.start ?timeout ?pool job ~level >>= fun () ->
+      Current.Job.start_with ?timeout ~pool job ~level >>= fun () ->
       with_context ~job k.source @@ fun dir ->
       let ctx =
         Obuilder.Context.v ~secrets ~src_dir:(Fpath.to_string dir)
@@ -207,7 +207,7 @@ module Raw = struct
 
   module BuildC = Current_cache.Make (Build)
 
-  let build ?pool ?timeout ?level ?schedule ?(extra_files = []) ?(secrets = [])
+  let build ?timeout ?level ?schedule ?(extra_files = []) ?(secrets = []) ~pool
       builder spec source =
     let key = Build.Key.{ spec; source; extra_files } in
     let ctx = Build.{ pool; timeout; level; builder; secrets } in
@@ -279,13 +279,13 @@ let get_build_context = function
   | `Git commit -> Current.map (fun x -> `Git x) commit
   | `Dir _ as v -> Current.return v
 
-let build ?level ?schedule ?label ?pool spec builder src =
+let build ?level ?schedule ?label ~pool spec builder src =
   let open Current.Syntax in
   Current.component "build%a" pp_sp_label label
   |> let> commit = get_build_context src in
-     Raw.build ?pool ?level ?schedule builder spec commit
+     Raw.build ~pool ?level ?schedule builder spec commit
 
-let run ?level ?schedule ?label ?pool builder
+let run ?level ?schedule ?label ~pool builder
     ?(rom : (string * string * Raw.Build.Value.t) list Current.t option)
     ?(pre_symlinks = []) ?(extra_files : Extra_files.file list Current.t option)
     ?(env = []) ?network ?(shell = []) ?secrets ?ctx_secrets ~snapshot cmds =
@@ -322,7 +322,7 @@ let run ?level ?schedule ?label ?pool builder
          (spec.ops @ env @ pre_symlinks @ symlinks @ shell
          @ List.map (Obuilder_spec.run ?network ?secrets ~rom "%s") cmds)
      in
-     Raw.build ?pool ?level ?schedule ?extra_files ?secrets:ctx_secrets builder
+     Raw.build ~pool ?level ?schedule ?extra_files ?secrets:ctx_secrets builder
        spec snapshot.ctx.source
 
 let contents ?level ?schedule ?label ?pool ~snapshot store files =
