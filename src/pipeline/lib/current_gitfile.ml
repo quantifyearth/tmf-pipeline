@@ -216,15 +216,19 @@ module Raw = struct
         List.fold_left (fun acc (_, d) -> Digest.string (acc ^ d)) "" output
         |> Digest.to_hex
       in
+      let dst_dir =
+        Fpath.of_string (Fpath.to_string k.dir ^ "-" ^ Git.Commit.hash k.commit)
+        |> Result.get_ok
+      in
       mv ~cancellable:true ~job
         ~src:Fpath.(dir // k.dir)
-        ~dst:Fpath.(git_dir // k.dir)
+        ~dst:Fpath.(git_dir // dst_dir)
       >>!= fun () ->
       let v =
         Value.
           {
             digest;
-            dir = Fpath.(git_dir // k.dir);
+            dir = Fpath.(git_dir // dst_dir);
             files = List.map fst output;
           }
       in

@@ -68,10 +68,10 @@ let pipeline ?auth _token _config _store builder engine_config slack =
     (* We use this for pixel matching too for now. *)
     let tmf_gedi =
       Evaluations.Repos.tmf_implementation
-        "0cd3c35856af21892c0e2fbdf048089afbd045e1"
+        "b4d767fa610afee84add76e41c2530ce38ac6a68"
     in
     (* Control the number of obuilder jobs that can run in parallel *)
-    let pool = Current.Pool.create ~label:"obuilder" 3 in
+    let pool = Current.Pool.create ~label:"obuilder" 6 in
     let data = Evaluations.Repos.tmf_data () in
     let _scc_values = Current_gitfile.directory data (Fpath.v "scc") in
     let projects_dir = Current_gitfile.directory data (Fpath.v "projects") in
@@ -112,6 +112,7 @@ let pipeline ?auth _token _config _store builder engine_config slack =
       Current.component "Evaluate Projects"
       |> let** projects_dir = projects_dir
          and* configurations = configurations in
+         Fmt.pr "DIR %a%!\n" Fpath.pp projects_dir.dir;
          let config_img =
            Current_obuilder.build ~pool ~label:"config" Evaluations.data_spec
              builder (`Dir projects_dir.dir)

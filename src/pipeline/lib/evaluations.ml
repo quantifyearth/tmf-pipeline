@@ -64,14 +64,19 @@ module Python = struct
         copy ~from:`Context [ "." ] ~dst:"./";
       ]
 
-  let run ?label ?(args = []) ?(pre = []) ?pre_symlinks ?script_path ?rom
-      ?extra_files ?env ?network ?secrets ~ctx_secrets ~builder snapshot =
+  let run ?label ?(args = []) ?(pre = []) ?(as_module = false) ?pre_symlinks
+      ?script_path ?rom ?extra_files ?env ?network ?secrets ~ctx_secrets
+      ~builder snapshot =
     let ctx_secrets = [ ("earthdata", ctx_secrets) ] in
     Current_obuilder.run ?label builder ~snapshot ?rom ?extra_files ?env
       ?secrets ~ctx_secrets ?network ?pre_symlinks
       (pre
-      @ [ String.concat " " (("python" :: Option.to_list script_path) @ args) ]
-      )
+      @ [
+          String.concat " "
+            ((("python" :: (if as_module then [ "-m" ] else []))
+             @ Option.to_list script_path)
+            @ args);
+        ])
 end
 
 module Repos = struct
@@ -82,7 +87,10 @@ module Repos = struct
       "git@github.com:carboncredits/tmf-implementation.git"
 
   let tmf_data () =
-    Git.clone ~gref:"main" ~schedule "git@github.com:carboncredits/tmf-data.git"
+    (* ALL PROJECTS *)
+    (* Git.clone ~gref:"db7a7d1255d4a4860c87646a5443f28da4f05692" ~schedule "git@github.com:carboncredits/tmf-data.git" *)
+    Git.clone ~gref:"f924f30efdae63c88c7e2465318226f84eb9501a" ~schedule
+      "git@github.com:carboncredits/tmf-data.git"
 end
 
 let snapshots_to_rom
@@ -154,7 +162,7 @@ let accessibility ~pool ~builder ~jrc img =
 let srtm_zip_dir = "srtm_zip"
 let srtm_tif_dir = "srtm_tif"
 
-let srtm_elevation ~pool ~builder ~project_name ~boundaries
+let _srtm_elevation ~pool ~builder ~project_name ~boundaries
     ~pixel_matching_boundaries img =
   let rom =
     Current.list_seq
@@ -276,9 +284,29 @@ let evaluate ~pool ~project_name ~builder ~jrc ~gedi_base_img ~config_img img
         [ Current.map (fun v -> (wdir / "data", wdir, v)) buffer ]
     in
     python_run ~label:"GEDI" ~network:[ "host" ]
-      ~script_path:"./methods/inputs/download_gedi_data.py"
+      ~env:[ ("PYTHONPATH", wdir ^ ":$PYTHONPATH") ]
+      ~as_module:true ~script_path:"methods.inputs.download_gedi_data"
       ~args:[ input_dir / "output.geojson"; output_dir / "gedi" ]
       ~secrets:[ earthdata ] ~rom gedi_base_img
+  in
+  let gedi_import =
+    let rom =
+      Current.list_seq [ Current.map (fun v -> (wdir / "data", wdir, v)) gedi ]
+    in
+    python_run ~label:"import GEDI" ~network:[ "host" ]
+      ~env:
+        [
+          ("PYTHONPATH", wdir ^ ":$PYTHONPATH");
+          ("EARTH_DATA_COOKIE_FILE", "./cookie");
+          ("DATA_PATH", "./data");
+          ("USER_PATH", "/home/tmf");
+          ("DB_HOST", "aello");
+          ("DB_USER", "tmf_writer");
+          ("DB_NAME", "tmf_gedi");
+        ]
+      ~as_module:true ~script_path:"methods.inputs.import_gedi_data"
+      ~args:[ input_dir / "gedi" ]
+      ~rom gedi_base_img
   in
   let luc =
     let rom =
@@ -304,8 +332,9 @@ let evaluate ~pool ~project_name ~builder ~jrc ~gedi_base_img ~config_img img
         [
           Current.map (fun v -> (wdir / "data", wdir, v)) buffer;
           Current.map (fun v -> (wdir / "data", wdir, v)) luc;
-          Current.map (fun v -> (wdir / "data", wdir, v)) gedi;
-          (* Not needed, remove once GEDI is used elsewhere *)
+          (* We don't really need whats in the GEDI import image, but the import
+             must have been completed. *)
+          Current.map (fun v -> (wdir / "data", wdir, v)) gedi_import;
         ]
     in
     python_run ~rom ~label:"carbon density"
@@ -325,7 +354,7 @@ let evaluate ~pool ~project_name ~builder ~jrc ~gedi_base_img ~config_img img
         [
           input_dir / "output.geojson";
           input_dir / "luc.tif";
-          output_dir / "carbon.csv";
+          (output_dir / project_name) ^ "-carbon-density.csv";
         ]
       img
   in
@@ -335,7 +364,7 @@ let evaluate ~pool ~project_name ~builder ~jrc ~gedi_base_img ~config_img img
       ~snapshot:config_img builder
       [ "rm /inputs/" ^ project_name ]
   in
-  let matching_area =
+  let _matching_area =
     (* Requires project shapefile, country code, country shapefile, ecoregions shapefile, other projects and output *)
     let rom =
       Current.list_seq
@@ -363,24 +392,26 @@ let evaluate ~pool ~project_name ~builder ~jrc ~gedi_base_img ~config_img img
         ]
       gedi_base_img
   in
-  let elev =
-    srtm_elevation ~pool ~builder ~project_name ~boundaries:config_img
-      ~pixel_matching_boundaries:matching_area gedi_base_img
-  in
+  (* let elev =
+       srtm_elevation ~pool ~builder ~project_name ~boundaries:config_img
+         ~pixel_matching_boundaries:matching_area gedi_base_img
+     in *)
   let additionality =
     let rom =
       Current.list_seq
         [
           Current.map (fun v -> (wdir / "data", wdir, v)) carbon;
-          Current.map (fun v -> (wdir / "data", wdir, v)) matching_area;
-          Current.map (fun v -> (wdir / "data", wdir, v)) elev;
+          (* Current.map (fun v -> (wdir / "data", wdir, v)) matching_area; *)
+          (* Current.map (fun v -> (wdir / "data", wdir, v)) elev; *)
         ]
     in
-    python_run ~rom ~label:"additionality" ~script_path:"main.py"
-      ~args:[ "--method"; "additionality" ]
-      img
+    Current.collapse ~key:"project" ~value:project_name
+      ~input:(label project_name img)
+    @@ python_run ~rom ~label:"additionality" ~script_path:"main.py"
+         ~args:[ "--method"; "additionality" ]
+         img
   in
-  let leakage =
+  let _leakage =
     let rom =
       Current.list_seq
         [ Current.map (fun v -> (wdir / "data", wdir, v)) carbon ]
@@ -388,20 +419,20 @@ let evaluate ~pool ~project_name ~builder ~jrc ~gedi_base_img ~config_img img
     python_run ~rom ~label:"leakage" ~script_path:"main.py"
       ~args:[ "--method"; "leakage" ] img
   in
-  let permanence =
-    let rom =
-      Current.list_seq
-        [
-          Current.map (fun v -> (wdir / "data", wdir, v)) additionality;
-          Current.map (fun v -> (wdir / "data", wdir, v)) leakage;
-        ]
-    in
-    Current.collapse ~key:"project" ~value:project_name
-      ~input:(label project_name img)
-    @@ python_run ~rom
-         ~label:("permanence " ^ String.lowercase_ascii project_name)
-         ~script_path:"main.py"
-         ~args:[ "--method"; "permanence" ]
-         img
-  in
-  Current.ignore_value permanence
+  (* let _permanence =
+       let rom =
+         Current.list_seq
+           [
+             Current.map (fun v -> (wdir / "data", wdir, v)) additionality;
+             Current.map (fun v -> (wdir / "data", wdir, v)) leakage;
+           ]
+       in
+       Current.collapse ~key:"project" ~value:project_name
+         ~input:(label project_name img)
+       @@ python_run ~rom
+            ~label:("permanence " ^ String.lowercase_ascii project_name)
+            ~script_path:"main.py"
+            ~args:[ "--method"; "permanence" ]
+            img
+     in *)
+  Current.ignore_value additionality
