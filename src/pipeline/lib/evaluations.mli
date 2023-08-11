@@ -8,7 +8,7 @@ module Repos : sig
   val tmf_implementation : string -> Current_git.Commit.t Current.t
   (** The TMF methodology implementation code at [gref]. *)
 
-  val tmf_data : unit -> Current_git.Commit.t Current.t
+  val tmf_data : ?gref:string -> unit -> Current_git.Commit.t Current.t
   (** The TMF data repository for projection configurations *)
 end
 
@@ -30,36 +30,14 @@ val snapshots_to_rom :
 (** Converts a list of build output, src directory, target directory tuples into a suitable
     read-only mount description for OBuilder. *)
 
-val jrc :
-  pool:unit Current.Pool.t ->
-  builder:Current_obuilder.builder ->
-  Current_obuilder.Raw.Build.Value.t Current.t ->
-  Current_obuilder.Raw.Build.Value.t Current.t
-(** [jrc ~builder base] downloads JRC data into a container. *)
-
-val ecoregions :
-  pool:unit Current.Pool.t ->
-  builder:Current_obuilder.builder ->
-  jrc:Current_obuilder.Raw.Build.Value.t Current.t ->
-  Current_obuilder.Raw.Build.Value.t Current.t ->
-  Current_obuilder.Raw.Build.Value.t Current.t
-(** Downloads ecoregion data into a container. *)
-
-val countries :
-  pool:unit Current.Pool.t ->
-  builder:Current_obuilder.builder ->
-  Current_obuilder.Raw.Build.Value.t Current.t ->
-  Current_obuilder.Raw.Build.Value.t Current.t
-(** Downloads country data into a container. *)
-
 val evaluate :
   pool:unit Current.Pool.t ->
+  projects_dir:Current_gitfile.Raw.Git_dir.Value.t ->
   project_name:string ->
   builder:Current_obuilder.builder ->
-  jrc:Current_obuilder.Raw.Build.Value.t Current.t ->
-  gedi_base_img:Current_obuilder.Raw.Build.Value.t Current.t ->
-  config_img:Current_obuilder.Raw.Build.Value.t Current.t ->
-  Current_obuilder.Raw.Build.Value.t Current.t ->
+  inputs:Current_obuilder.Raw.Build.Value.t Current.t ->
+  matching:Current_obuilder.Raw.Build.Value.t Current.t ->
+  outputs:Current_obuilder.Raw.Build.Value.t Current.t ->
   Config.t ->
   unit Current.t
 (** The evaluation pipeline for a particular project. The [config_img] contains the

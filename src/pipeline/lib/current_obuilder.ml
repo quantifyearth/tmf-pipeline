@@ -330,3 +330,5 @@ let contents ?level ?schedule ?label ?pool ~snapshot store files =
   Current.component "read%a" pp_sp_label label
   |> let> snapshot = snapshot in
      Raw.contents ?pool ?level ?schedule store snapshot files
+
+type output = Raw.Build.Value.t

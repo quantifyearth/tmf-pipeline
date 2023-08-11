@@ -60,20 +60,36 @@ let pipeline ?auth _token _config _store builder engine_config slack =
   in
   let pipeline () =
     let open Evaluations in
-    let tmf_main = Evaluations.Repos.tmf_implementation "main" in
-    let tmf_jrc =
+    (* To avoid recalculating too much we pin each subdirectory to a specific SHA
+       so we don't needlessly redownload. If the workflow works well we may wish to
+       use branches upstream that we push to. *)
+    let tmf_inputs =
       Evaluations.Repos.tmf_implementation
-        "a376fc3b8be67c31c98261dff618311de9df4209"
+        "5963305a31116287d747a2bf5e645d116b2398ac"
     in
-    (* We use this for pixel matching too for now. *)
-    let tmf_gedi =
+    let tmf_matching =
       Evaluations.Repos.tmf_implementation
-        "b4d767fa610afee84add76e41c2530ce38ac6a68"
+        "5963305a31116287d747a2bf5e645d116b2398ac"
+    in
+    let tmf_outputs =
+      Evaluations.Repos.tmf_implementation
+        "5963305a31116287d747a2bf5e645d116b2398ac"
     in
     (* Control the number of obuilder jobs that can run in parallel *)
-    let pool = Current.Pool.create ~label:"obuilder" 6 in
+    let pool = Current.Pool.create ~label:"obuilder" 2 in
+    let inputs =
+      Current_obuilder.build ~pool ~label:"tmf-inputs"
+        Evaluations.Python.spec_with_data_dir builder (`Git tmf_inputs)
+    in
+    let outputs =
+      Current_obuilder.build ~pool ~label:"tmf-outputs"
+        Evaluations.Python.spec_with_data_dir builder (`Git tmf_outputs)
+    in
+    let matching =
+      Current_obuilder.build ~pool ~label:"tmf-matching"
+        Evaluations.Python.spec_with_data_dir builder (`Git tmf_matching)
+    in
     let data = Evaluations.Repos.tmf_data () in
-    let _scc_values = Current_gitfile.directory data (Fpath.v "scc") in
     let projects_dir = Current_gitfile.directory data (Fpath.v "projects") in
     let configurations =
       let+ configs =
@@ -88,44 +104,19 @@ let pipeline ?auth _token _config _store builder engine_config slack =
       in
       List.filter_map map_config configs
     in
-    (* HACK:
-       Currently all of our python code lives in the same repository which means every time
-       a new commit is pushed, we have to update all of the nodes essentially including large
-       data imports (even if that part of the code is unchanged). To get around this I'm creating
-       a few different images with different Git contexts -- the actual computation parts will
-       track `main` whereas the data inputs will be pinned to specific commits.
-    *)
-    let img =
-      Current_obuilder.build ~pool ~label:"tmf"
-        Evaluations.Python.spec_with_data_dir builder (`Git tmf_main)
-    in
-    let jrc_input =
-      Current_obuilder.build ~pool ~label:"jrc" Evaluations.Python.spec builder
-        (`Git tmf_jrc)
-    in
-    let gedi_input =
-      Current_obuilder.build ~pool ~label:"gedi"
-        Evaluations.Python.spec_with_data_dir builder (`Git tmf_gedi)
-    in
-    let jrc = Evaluations.jrc ~pool ~builder jrc_input in
     let others =
       Current.component "Evaluate Projects"
       |> let** projects_dir = projects_dir
          and* configurations = configurations in
-         Fmt.pr "DIR %a%!\n" Fpath.pp projects_dir.dir;
-         let config_img =
-           Current_obuilder.build ~pool ~label:"config" Evaluations.data_spec
-             builder (`Dir projects_dir.dir)
-         in
          (* TODO: Make this a parameter so we can run the pipeline but not for ALL projects. *)
          let projects = configurations in
          let evals =
            List.map
              (fun (project_name, project_config) ->
-               Evaluations.evaluate ~pool ~jrc ~config_img
-                 ~gedi_base_img:gedi_input
+               Evaluations.evaluate ~pool ~projects_dir ~inputs ~outputs
+                 ~matching
                  ~project_name:(Fpath.filename project_name)
-                 ~builder img project_config)
+                 ~builder project_config)
              projects
          in
          Current.all evals
