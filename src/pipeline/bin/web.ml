@@ -138,8 +138,6 @@ let connect (Builder ((module B), b) : Current_obuilder.builder) id =
       Lwt.return resp
   end
 
-module HMap = Hashtbl.Make (String)
-
 let static_routes ~engine ~store builder custom_css =
   [
     Routes.(

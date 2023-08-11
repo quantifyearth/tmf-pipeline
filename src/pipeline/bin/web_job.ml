@@ -142,6 +142,7 @@ let render ctx ~actions ~job_id ~log:path jobs =
     if id = job_id then b [ label ]
     else a ~a:[ a_href (Fmt.str "/job/%s" id) ] [ label ]
   in
+  let ansi = Ansi.create () in
   let history =
     match Current_cache.Db.history ~limit:10 ~job_id with
     | None, [] -> []
@@ -199,30 +200,57 @@ let render ctx ~actions ~job_id ~log:path jobs =
                       | Some job -> Current.Job.wait_for_log_data job >>= aux)
                   | data, next ->
                       i := `Log next;
-                      let data =
-                        Astring.String.cuts ~sep:"---> saved as " data
-                      in
-                      let rec loop acc = function
-                        | pre :: cache :: rest ->
-                            let c =
-                              pre ^ "---> saved as " ^ link_obuilder_id cache
-                            in
-                            loop (c :: acc) rest
-                        | [] -> List.rev acc |> String.concat ~sep:""
-                        | [ cache ] ->
-                            let c =
-                              "" ^ "---> saved as " ^ link_obuilder_id cache
-                            in
-                            loop (c :: acc) []
-                      in
-                      let data = loop [] data in
-                      (* let data = Ansi.process ansi data in *)
-                      Lwt.return_some data
+                      Lwt.return_some (Ansi.process ansi data)
                 in
                 aux ()
             | `Done -> Lwt.return_none)
       in
       Cohttp_lwt.Body.of_stream stream
+(* match String.cut ~sep tmpl with
+   | None -> assert false
+   | Some (pre, post) ->
+       let i = ref `Pre in
+       let stream =
+         Lwt_stream.from (fun () ->
+             match !i with
+             | `Pre ->
+                 i := `Log 0L;
+                 Lwt.return_some pre
+             | `Log start ->
+                 let rec aux () =
+                   match read ~start path with
+                   | "", _ -> (
+                       match Current.Job.lookup_running job_id with
+                       | None ->
+                           i := `Done;
+                           Lwt.return_some post
+                       | Some job -> Current.Job.wait_for_log_data job >>= aux)
+                   | data, next ->
+                       i := `Log next;
+                       let data =
+                         Astring.String.cuts ~sep:"---> saved as " data
+                       in
+                       let rec loop acc = function
+                         | pre :: cache :: rest ->
+                             let c =
+                               pre ^ "---> saved as " ^ link_obuilder_id cache
+                             in
+                             loop (c :: acc) rest
+                         | [] -> List.rev acc |> String.concat ~sep:""
+                         | [ cache ] ->
+                             let c =
+                               "" ^ "---> saved as " ^ link_obuilder_id cache
+                             in
+                             loop (c :: acc) []
+                       in
+                       let data = loop [] data in
+                       (* let data = Ansi.process ansi data in *)
+                       Lwt.return_some data
+                 in
+                 aux ()
+             | `Done -> Lwt.return_none)
+       in
+       Cohttp_lwt.Body.of_stream stream *)
 
 type actions = < rebuild : (unit -> string) option >
 
