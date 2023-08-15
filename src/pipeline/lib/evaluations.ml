@@ -338,22 +338,29 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~matching
   let access, _ = accessibility ~pool ~builder ~jrc inputs in
   let python_run = Python.run ~pool ~ctx_secrets ~builder in
   let config_path, config_img =
-    Data.with_output data project_name @@ fun _ ->
-    Current_obuilder.build ~pool ~label:"config" data_spec builder
-      (`Dir projects_dir.Current_gitfile.Raw.Git_dir.Value.dir)
+    let _path, img =
+      Data.with_output data "project_name" @@ fun _ ->
+      Current_obuilder.build ~pool ~label:"config" data_spec builder
+        (`Dir projects_dir.Current_gitfile.Raw.Git_dir.Value.dir)
+    in
+    let path, _ =
+      Data.with_output data project_name @@ fun _ ->
+      Current_obuilder.run ~pool ~label:("just project " ^ project_name_no_geojson)
+        ~shell:[ Obuilder_spec.shell [ "/bin/sh"; "-c" ] ]
+        ~snapshot:img builder
+        [ Fmt.str "find /home/tmf/app/data ! -name '%s' -type f -exec rm -f {} +" project_name ]
+    in
+    path, img
   in
   let buffer, _ =
-    (* let rom =
-         Current.list_seq [ Current.map (fun v -> (arkdir, wdir, v))  ]
-       in *)
-    Data.with_input data config_path @@ fun conf_dir is ->
+    Data.with_input data config_path @@ fun conf_path is ->
     let rom = Data.collect_inputs is in
     Data.with_output data (project_name_no_geojson ^ "-buffer.geojson")
     @@ fun out ->
     python_run ~rom ~label:"buffer"
       ~env:[ ("PYTHONPATH", wdir ^ ":$PYTHONPATH") ]
       ~script_path:"methods.inputs.generate_boundary"
-      ~args:[ "--project"; conf_dir / project_name; "--output"; out ]
+      ~args:[ "--project"; conf_path; "--output"; out ]
       inputs
   in
   let _gedi, _ =
@@ -432,7 +439,7 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~matching
       inputs
   in
   let matching_area, _ =
-    Data.with_input data config_path @@ fun conf ->
+    Data.with_input data config_path @@ fun conf_path ->
     Data.extend_inputs data other_projects @@ fun op ->
     Data.extend_inputs data country @@ fun country ->
     Data.extend_inputs data eco_download @@ fun eco is ->
@@ -446,7 +453,7 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~matching
         [ Obuilder_spec.run "mkdir projects && mkdir projects/inputs" ]
       ~args:
         [
-          conf / project_name;
+          conf_path;
           project_config.country_code;
           country;
           eco;

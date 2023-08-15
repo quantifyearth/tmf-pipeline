@@ -65,15 +65,15 @@ let pipeline ?auth _token _config _store builder engine_config slack =
        use branches upstream that we push to. *)
     let tmf_inputs =
       Evaluations.Repos.tmf_implementation
-        "5963305a31116287d747a2bf5e645d116b2398ac"
+        "e2c5c23e9fcd271f3899f56f192d79cd7c28684c"
     in
     let tmf_matching =
       Evaluations.Repos.tmf_implementation
-        "5963305a31116287d747a2bf5e645d116b2398ac"
+        "e2c5c23e9fcd271f3899f56f192d79cd7c28684c"
     in
     let tmf_outputs =
       Evaluations.Repos.tmf_implementation
-        "5963305a31116287d747a2bf5e645d116b2398ac"
+        "e2c5c23e9fcd271f3899f56f192d79cd7c28684c"
     in
     (* Control the number of obuilder jobs that can run in parallel *)
     let pool = Current.Pool.create ~label:"obuilder" 2 in
