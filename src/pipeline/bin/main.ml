@@ -76,7 +76,7 @@ let pipeline ?auth _token _config _store builder engine_config slack =
         "e2c5c23e9fcd271f3899f56f192d79cd7c28684c"
     in
     (* Control the number of obuilder jobs that can run in parallel *)
-    let pool = Current.Pool.create ~label:"obuilder" 2 in
+    let pool = Current.Pool.create ~label:"obuilder" 1 in
     let inputs =
       Current_obuilder.build ~pool ~label:"tmf-inputs"
         Evaluations.Python.spec_with_data_dir builder (`Git tmf_inputs)

@@ -551,6 +551,8 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~matching
           slope;
           "--access";
           access;
+          "-j";
+          "20";
           "--output";
           out;
         ]
@@ -641,6 +643,8 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~matching
           slope;
           "--access";
           access;
+          "-j";
+          "20";
           "--output";
           out;
         ]
