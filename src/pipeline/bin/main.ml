@@ -69,11 +69,11 @@ let pipeline ?auth _token _config _store builder engine_config slack =
     in
     let tmf_matching =
       Evaluations.Repos.tmf_implementation
-        "e2c5c23e9fcd271f3899f56f192d79cd7c28684c"
+        "43609ab19848c62e2a278c4b423643ac313cd616"
     in
     let tmf_outputs =
       Evaluations.Repos.tmf_implementation
-        "e2c5c23e9fcd271f3899f56f192d79cd7c28684c"
+        "ba2d0ef283dfdfd63614545eba431d07cf5881ca"
     in
     (* Control the number of obuilder jobs that can run in parallel *)
     let pool = Current.Pool.create ~label:"obuilder" 1 in
@@ -110,6 +110,13 @@ let pipeline ?auth _token _config _store builder engine_config slack =
          and* configurations = configurations in
          (* TODO: Make this a parameter so we can run the pipeline but not for ALL projects. *)
          let projects = configurations in
+         (* Momentarily restrict to Gola *)
+         let projects =
+           List.filter
+             (fun (_, c) ->
+               c.Evaluations.Config.vcs_id = 1201 || c.vcs_id = 1215)
+             projects
+         in
          let evals =
            List.map
              (fun (project_name, project_config) ->
