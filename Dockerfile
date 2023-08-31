@@ -6,5 +6,4 @@ COPY --chown=opam tmf-pipeline.opam /src/
 WORKDIR /src
 RUN opam install -y --deps-only --with-test .
 ADD --chown=opam . .
-RUN opam exec -- dune build @runtest
-RUN opam exec -- dune build --profile release ./_build/install/default/bin/retirement
+RUN opam exec -- dune build @runtest @install @check
