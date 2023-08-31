@@ -110,13 +110,6 @@ let pipeline ?auth _token _config _store builder engine_config slack =
          and* configurations = configurations in
          (* TODO: Make this a parameter so we can run the pipeline but not for ALL projects. *)
          let projects = configurations in
-         (* Momentarily restrict to Gola *)
-         let projects =
-           List.filter
-             (fun (_, c) ->
-               c.Evaluations.Config.vcs_id = 1201 || c.vcs_id = 1215)
-             projects
-         in
          let evals =
            List.map
              (fun (project_name, project_config) ->

@@ -11,9 +11,13 @@
   websocket-lwt-unix.cohttp
   fmt.cli
   logs.cli
+  htmlit
+  csv
   fmt.tty
   capnp-rpc-unix
   current_rpc))
+
+(include_subdirs qualified)
 
 (subdir
  ./static

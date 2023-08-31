@@ -1,0 +1,33 @@
+opam-version: "2.0"
+maintainer:   "pf341@cam.ac.uk"
+authors:      [ "4C" ]
+license:      "ISC"
+homepage:     "https://github.com/carboncredits/tmf-pipeline"
+bug-reports:  "https://github.com/carboncredits/tmf-pipeline/issues"
+dev-repo:     "git+https://github.com/carboncredits/tmf-pipeline.git"
+build: [
+ ["dune" "subst"] {dev}
+ ["dune" "build" "-p" name "-j" jobs]
+ ["dune" "runtest" "-p" name "-j" jobs] {with-test}
+]
+depends: [
+  "ocaml"          {>= "4.14.0"}
+  "dune"           {>= "3.9.0"}
+  # Web stuff
+  "brr"
+  "websocket-lwt-unix"
+  "capnp-rpc-unix"
+  "htmlit"
+  "csv"
+  "digestif"
+  "crunch"
+  # Pipeline stuff
+  "current"
+  "current_git"
+  "current_github"
+  "current_web"
+  "current_docker"
+  "obuilder"
+  "obuilder-spec"
+]
+synopsis: "Tropical Moist Forest Pipeline"

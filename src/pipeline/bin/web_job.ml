@@ -6,6 +6,7 @@ module Server = Cohttp_lwt_unix.Server
 
 let sep = "@@LOG@@"
 let max_log_chunk_size = 102400L (* 100K at a time *)
+let ( / ) = Filename.concat
 
 let read ~start path =
   let ch = open_in_bin (Fpath.to_string path) in
@@ -173,10 +174,17 @@ let render ctx ~actions ~job_id ~log:path jobs =
   let line_numbers_js =
     [ script ~a:[ a_src (Xml.uri_of_string "/js/line-numbers.js") ] (txt "") ]
   in
+  let proto =
+    [
+      a
+        ~a:[ a_href (Fmt.str "/proto/job/%s" job_id) ]
+        [ txt "Prototype page"; sup [ txt "New!" ] ];
+    ]
+  in
   let tmpl =
     Current_web.Context.template ctx
-      (line_numbers_js @ history @ zip_button @ rebuild_button @ cancel_button
-     @ start_button @ inputs
+      (line_numbers_js @ history @ proto @ zip_button @ rebuild_button
+     @ cancel_button @ start_button @ inputs
       @ [ pre [ txt sep ] ])
   in
   match String.cut ~sep tmpl with
@@ -264,6 +272,99 @@ let lookup_actions ~engine job_id =
         method rebuild = None
       end
 
+let find_paths pred paths =
+  let rec loop acc = function
+    | `Dir (_, more) -> List.fold_left loop acc more
+    | `File (path, _) -> if pred path then path :: acc else acc
+    | _ -> acc
+  in
+  loop [] paths
+
+let proto_job ~store ~engine ~job_id =
+  object
+    inherit Current_web.Resource.t
+    val! can_get = `Viewer
+
+    method! private get ctx =
+      let _actions = lookup_actions ~engine job_id in
+      match Current.Job.log_path job_id with
+      | Error (`Msg msg) -> Context.respond_error ctx `Bad_request msg
+      | Ok path ->
+          let manifest, geojsons, images, tabular =
+            match find_final_build_result path with
+            | None -> ("No data", [], [], [])
+            | Some id -> (
+                let src_dir =
+                  Fpath.(
+                    store / "result" / id / "rootfs" / "home" / "tmf" / "app")
+                  |> Fpath.to_string
+                in
+                match
+                  Obuilder.Manifest.generate ~exclude:[] ~src_dir "data"
+                with
+                | Error (`Msg m) -> (m, [], [], [])
+                | Ok src_manifest ->
+                    let geojsons =
+                      find_paths
+                        (fun p -> Filename.extension p = ".geojson")
+                        src_manifest
+                    in
+                    let geojsons =
+                      List.map Uri.pct_encode geojsons
+                      |> List.map (fun v ->
+                             "." / id
+                             / (Uri.with_query (Uri.of_string "serve")
+                                  [ ("file", [ v ]) ]
+                               |> Uri.to_string))
+                    in
+                    let images =
+                      find_paths
+                        (fun p ->
+                          Filename.extension p = ".png"
+                          || Filename.extension p = ".jpeg")
+                        src_manifest
+                    in
+                    let images =
+                      List.map Uri.pct_encode images
+                      |> List.map (fun v ->
+                             "." / id
+                             / (Uri.with_query (Uri.of_string "serve")
+                                  [ ("file", [ v ]) ]
+                               |> Uri.to_string))
+                    in
+                    let table =
+                      match
+                        find_paths
+                          (fun p -> Filename.extension p = ".csv")
+                          src_manifest
+                      with
+                      | data :: _ ->
+                          In_channel.with_open_bin
+                            (Filename.concat src_dir data)
+                          @@ fun ic -> [ Csv.load_in ic ]
+                      | _ -> []
+                    in
+                    ( Obuilder.Manifest.sexp_of_t src_manifest
+                      |> Sexplib.Sexp.to_string_hum,
+                      geojsons,
+                      images,
+                      table ))
+          in
+          let inputs = input_jobs ~id:job_id (Current.Engine.pipeline engine) in
+          let page =
+            Pages.Build.page ~geojsons ~images ~tabular ~manifest ~title:"Build"
+              ~id:job_id ~inputs ()
+          in
+          let body =
+            Cohttp_lwt.Body.of_string (Htmlit.El.to_string ~doctype:true page)
+          in
+          let headers =
+            (* Otherwise, an nginx reverse proxy will wait for the whole log before sending anything. *)
+            Cohttp.Header.init_with "X-Accel-Buffering" "no"
+          in
+          Server.respond ~status:`OK ~headers ~body () >|= fun r -> `Response r
+  end
+
 let job ~engine ~job_id =
   object
     inherit Current_web.Resource.t
@@ -286,6 +387,27 @@ let job ~engine ~job_id =
 let with_file f fn =
   Lwt_unix.openfile f [ Unix.O_RDWR; Unix.O_CREAT ] 0o644 >>= fun fd ->
   Lwt.finalize (fun () -> fn (f, fd)) (fun () -> Lwt_unix.close fd)
+
+let serve ~store ~id _file =
+  object
+    inherit Resource.t
+    val! can_post = `Builder
+
+    method! private get ctx =
+      let req = Context.request ctx in
+      let res = Cohttp_lwt.Request.resource req |> Uri.of_string in
+      let file =
+        Uri.get_query_param res "file" |> Option.get |> Uri.pct_decode
+      in
+      let fname =
+        Fpath.(
+          store / "result" / id / "rootfs" / "home" / "tmf" / "app"
+          // Fpath.v file)
+        |> Fpath.to_string
+      in
+      Logs.info (fun f -> f "Responding with %s" fname);
+      Server.respond_file ~fname () >|= fun r -> `Response r
+  end
 
 let download ~store ~id =
   object
@@ -364,6 +486,8 @@ let id ~date ~log = Fmt.str "%s/%s" date log
 let routes ~store ~engine =
   Routes.
     [
+      ( (s "proto" / s "job" / str / str /? nil) @--> fun date log ->
+        proto_job ~store ~engine ~job_id:(id ~date ~log) );
       ( (s "alt" / s "job" / str / str /? nil) @--> fun date log ->
         job ~engine ~job_id:(id ~date ~log) );
       ( (s "alt" / s "job" / str / str / s "rebuild" /? nil) @--> fun date log ->
@@ -373,6 +497,8 @@ let routes ~store ~engine =
       ( (s "alt" / s "job" / str / str / s "start" /? nil) @--> fun date log ->
         start ~job_id:(id ~date ~log) );
       (* TODO: Fix URLs *)
+      ( (s "proto" / s "job" / str / str / str /? nil) @--> fun _date id file ->
+        serve ~store ~id file );
       ( (s "job" / str / str / str / s "data.zip" /? nil)
       @--> fun _date _log id -> download ~store ~id );
       ( (s "alt" / s "job" / str / str / str / s "data.zip" /? nil)

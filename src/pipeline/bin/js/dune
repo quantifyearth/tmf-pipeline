@@ -2,3 +2,5 @@
  (name index)
  (modes js)
  (libraries brr xterm))
+
+(include_subdirs no)
