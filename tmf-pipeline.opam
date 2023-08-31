@@ -21,6 +21,11 @@ depends: [
   "csv"
   "digestif"
   "crunch"
+  # Hoke deps
+  "capnp-rpc-lwt"
+  "index"
+  "yojson"
+  "ppx_deriving_yojson"
   # Pipeline stuff
   "current"
   "current_git"

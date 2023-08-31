@@ -13,6 +13,8 @@
   logs.cli
   htmlit
   csv
+  hoke
+  index.unix
   fmt.tty
   capnp-rpc-unix
   current_rpc))

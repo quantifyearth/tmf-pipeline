@@ -7,3 +7,6 @@
 [submodule "vendor/jsoo-xterm"]
 	path = vendor/jsoo-xterm
 	url = https://github.com/patricoferris/jsoo-xterm
+[submodule "vendor/hoke"]
+	path = vendor/hoke
+	url = https://github.com/patricoferris/hoke

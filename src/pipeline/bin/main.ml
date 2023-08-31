@@ -185,7 +185,29 @@ let cmd =
       let ch = open_out "engine.cap" in
       output_string ch (Uri.to_string uri ^ "\n");
       close_out ch;
-      Lwt.choose [ Current.Engine.thread engine; Current_web.run ~mode site ]
+      (* Setup hoke daemon, this allows us to use capnp endpoints to send specifications
+         to build by the underlying obuilder instance or to hook into a shell of an existing
+         image. Quite experimental, but can be useful. *)
+      let daemon capnp =
+        let builder =
+          let (Current_obuilder.Builder ((module B), v)) = builder in
+          Hoke.Builder.Builder ((module B), v)
+        in
+        let make_sturdy = Capnp_rpc_unix.Vat_config.sturdy_uri capnp in
+        let load ~validate:_ ~sturdy_ref =
+          let sr = Capnp_rpc_lwt.Sturdy_ref.cast sturdy_ref in
+          Capnp_rpc_net.Restorer.grant (Hoke.Client.v ~sr builder) |> Lwt.return
+        in
+        let loader = Hoke_cmd.Store.create ~make_sturdy ~load "hoke.index" in
+        let services =
+          Capnp_rpc_net.Restorer.Table.of_loader (module Hoke_cmd.Store) loader
+        in
+        Hoke_cmd.Server.daemon capnp services builder loader.store "./secrets"
+      in
+      Lwt.choose
+        [
+          Current.Engine.thread engine; Current_web.run ~mode site; daemon capnp;
+        ]
     in
     match Lwt_main.run main with
     | Ok s -> print_endline s
