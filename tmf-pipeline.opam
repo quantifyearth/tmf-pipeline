@@ -24,6 +24,7 @@ depends: [
   # Pipeline stuff
   "current"
   "current_git"
+  "current_github"
   "current_web"
   "current_docker"
   "obuilder"
