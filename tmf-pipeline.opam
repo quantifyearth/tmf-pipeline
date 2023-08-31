@@ -19,6 +19,8 @@ depends: [
   "capnp-rpc-unix"
   "htmlit"
   "csv"
+  "digestif"
+  "crunch"
   # Pipeline stuff
   "current"
   "current_git"
