@@ -13,7 +13,7 @@ let ( / ) = Filename.concat
 
 let data_spec =
   let open Obuilder_spec in
-  stage ~from:"ghcr.io/osgeo/gdal:ubuntu-small-3.6.4"
+  stage ~from:(`Image "ghcr.io/osgeo/gdal:ubuntu-small-3.6.4")
     [
       run ~network:[ "host" ]
         "apt-get update -qqy && apt-get install -qy git wget libpq-dev \
@@ -32,7 +32,7 @@ module Python = struct
   (* TODO: This should be based on the CI Dockerfile! *)
   let spec =
     let open Obuilder_spec in
-    stage ~from:"ghcr.io/osgeo/gdal:ubuntu-small-3.6.4"
+    stage ~from:(`Image "ghcr.io/osgeo/gdal:ubuntu-small-3.6.4")
       [
         run ~network:[ "host" ]
           "apt-get update -qqy && apt-get install -qy git wget libpq-dev \
@@ -54,7 +54,7 @@ module Python = struct
 
   let spec_with_data_dir =
     let open Obuilder_spec in
-    stage ~from:"ghcr.io/osgeo/gdal:ubuntu-small-3.6.4"
+    stage ~from:(`Image "ghcr.io/osgeo/gdal:ubuntu-small-3.6.4")
       [
         run ~network:[ "host" ]
           "apt-get update -qqy && apt-get install -qy git wget libpq-dev \
@@ -435,6 +435,8 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~matching
           config_path;
           "--start_year";
           string_of_int project_config.project_start;
+          "--evaluation_year";
+          "2021";
           "--jrc";
           jrc;
           "--cpc";
@@ -531,6 +533,8 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~matching
           leakage_zone;
           "--start_year";
           string_of_int project_config.project_start;
+          "--evaluation_year";
+          "2021";
           "--jrc";
           jrc;
           "--cpc";
@@ -636,7 +640,7 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~matching
       matching
   in
   let additionality, additionality_data =
-    let rom = make_rom [ config_img; jrc_data; carbon_data; pairs_data ] in
+    let rom = make_rom [ config_img; carbon_data; pairs_data ] in
     let output = project_name_no_geojson ^ "-additionality.csv" in
     python_run ~rom ~label:"additionality" ~output
       ~env:[ ("DUMPDIR", output_dir) ]
@@ -649,8 +653,6 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~matching
           string_of_int project_config.project_start;
           "--evaluation_year";
           "2021";
-          "--jrc";
-          jrc;
           "--density";
           carbon;
           "--matches";
@@ -663,13 +665,7 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~matching
   let leakage, leakage_data =
     let rom =
       make_rom
-        [
-          config_img;
-          jrc_data;
-          carbon_data;
-          leakage_pairs_data;
-          leakage_zone_data;
-        ]
+        [ config_img; carbon_data; leakage_pairs_data; leakage_zone_data ]
     in
     let output = project_name_no_geojson ^ "-leakage.csv" in
     python_run ~rom ~label:"leakage" ~output
@@ -685,8 +681,6 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~matching
           string_of_int project_config.project_start;
           "--evaluation_year";
           "2021";
-          "--jrc";
-          jrc;
           "--density";
           carbon;
           "--matches";
@@ -698,7 +692,7 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~matching
   in
   let scc, scc_data =
     let spec =
-      Obuilder_spec.stage ~from:"ghcr.io/osgeo/gdal:ubuntu-small-3.6.4"
+      Obuilder_spec.stage ~from:(`Image "ghcr.io/osgeo/gdal:ubuntu-small-3.6.4")
         Obuilder_spec.
           [
             run "useradd -ms /bin/bash -u 1000 tmf";

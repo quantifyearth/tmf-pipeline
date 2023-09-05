@@ -69,7 +69,7 @@ let template title body =
             border-right: thin solid grey;
         }
 
-        #map { width: 100%; height: 400px }
+        #map { width: 100%; height: 800px }
     |};
           ];
       ]
@@ -91,30 +91,46 @@ let pure_button ?(disabled = false) href txt =
 
 let map geojsons =
   let open Htmlit in
-  let add i data =
-    let set_view =
-      if i = 0 then Fmt.str "map.setView(k.getBounds().getCenter(), 6)" else ""
-    in
+  let add =
     Fmt.str
-      {|fetch("%s").then(res => res.json()).then(data => {
-    // add GeoJSON layer to the map once the file is loaded
-    var k = L.geoJson(data).addTo(map);
-    %s
-    });
-    |}
-      data set_view
+      {|fetch(url).then(res => res.json()).then(data => {
+      // add GeoJSON layer to the map once the file is loaded
+      var k = L.geoJson(data, { minZoom: 3 });
+      if (i == 0) { map.setView(k.getBounds().getCenter(), 6) };
+      return k
+    })|}
+  in
+  let jsarr =
+    Fmt.str "var urls = [ %a ]"
+      Fmt.(list ~sep:(Fmt.any ", ") (quote string))
+      geojsons
   in
   El.script
-    ([
-       El.unsafe_raw
-         {|
-      var map = L.map('map').setView([54.505, -6], 9);
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    [
+      El.unsafe_raw
+        (Fmt.str
+           {|
+      var osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          minZoom: 3,
+          maxZoom: 19,
           attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-      }).addTo(map);
-    |};
-     ]
-    @ List.mapi (fun i v -> El.unsafe_raw (add i v)) geojsons)
+      })
+      var map = L.map('map', {
+        center: [-5.006552150273841, -1.1807189565615772e-05],
+        zoom: 13,
+        minZoom: 3,
+        maxZoom: 13,
+        layers: [ osm ]
+      })
+      %s
+      var proms = urls.map((url, i) => %s)
+      Promise.all(proms).then((layers) => { 
+        console.log(layers);
+        L.control.layers({ "OSM": osm }, layers, {collapsed: false}).addTo(map)
+      })
+    |}
+           jsarr add);
+    ]
 
 module Table = struct
   type t = string list list
@@ -167,7 +183,9 @@ let page ?(geojsons = []) ?(images = []) ?(tabular = []) ~title ~id ~inputs
                          begin a download for them. This is only really \
                          feasible on relatively small datasets.";
                     ];
-                  El.pre [ El.code [ El.txt manifest ] ];
+                  El.pre
+                    ~at:[ At.style "height:300px; overflow-y:scroll" ]
+                    [ El.code [ El.txt manifest ] ];
                   (match geojsons with
                   | [] -> El.void
                   | _ ->
