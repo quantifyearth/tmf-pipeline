@@ -92,12 +92,20 @@ let pure_button ?(disabled = false) href txt =
 let map geojsons =
   let open Htmlit in
   let add =
-    Fmt.str
-      {|fetch(url).then(res => res.json()).then(data => {
+    {|fetch(url).then(res => res.json()).then(data => {
       // add GeoJSON layer to the map once the file is loaded
-      var k = L.geoJson(data, { minZoom: 3 });
+      var k = L.geoJson(data, { 
+        style: lineStyle, 
+        minZoom: 3,
+        pointToLayer: function (feature, latlng) {
+        return L.circleMarker(latlng, geojsonMarkerOptions);
+      }});
       if (i == 0) { map.setView(k.getBounds().getCenter(), 6) };
-      return k
+      var obj = {};
+      // Extracting filepath from query params of URL
+      var file = new URLSearchParams(url.split("?")[1]).get("file").split("%2F")[1]
+      obj[file] = k;
+      return obj;
     })|}
   in
   let jsarr =
@@ -110,6 +118,19 @@ let map geojsons =
       El.unsafe_raw
         (Fmt.str
            {|
+      var geojsonMarkerOptions = {
+          radius: 3,
+          fillColor: "#ff0000",
+          color: "#000",
+          weight: 1,
+          opacity: 0.4,
+          fillOpacity: 0.4
+      };
+      var lineStyle = {
+          "color": "#ff7800",
+          "weight": 2,
+          "opacity": 0.3
+      };
       var osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
           minZoom: 3,
           maxZoom: 19,
@@ -117,6 +138,7 @@ let map geojsons =
       })
       var map = L.map('map', {
         center: [-5.006552150273841, -1.1807189565615772e-05],
+        preferCanvas: true,
         zoom: 13,
         minZoom: 3,
         maxZoom: 13,
@@ -125,6 +147,7 @@ let map geojsons =
       %s
       var proms = urls.map((url, i) => %s)
       Promise.all(proms).then((layers) => { 
+        var layers = layers.reduce(((r, c) => Object.assign(r, c)), {});
         console.log(layers);
         L.control.layers({ "OSM": osm }, layers, {collapsed: false}).addTo(map)
       })

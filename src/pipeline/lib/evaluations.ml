@@ -28,6 +28,23 @@ let data_spec =
       copy [ "." ] ~dst:"/home/tmf/app/data";
     ]
 
+let other_projects_spec =
+  let open Obuilder_spec in
+  stage ~from:(`Image "ghcr.io/osgeo/gdal:ubuntu-small-3.6.4")
+    [
+      run ~network:[ "host" ]
+        "apt-get update -qqy && apt-get install -qy git wget libpq-dev \
+         python3-pip  && rm -rf /var/lib/apt/lists/* && rm -rf \
+         /var/cache/apt/*";
+      run "useradd -ms /bin/bash -u 1000 tmf";
+      workdir wdir;
+      run "chown -R tmf:tmf /home/tmf";
+      Obuilder_spec.user_unix ~uid:1000 ~gid:1000;
+      run "mkdir /home/tmf/app/data";
+      run "mkdir /home/tmf/app/data/projects";
+      copy [ "." ] ~dst:"/home/tmf/app/data/projects";
+    ]
+
 module Python = struct
   (* TODO: This should be based on the CI Dockerfile! *)
   let spec =
@@ -356,14 +373,14 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~matching
           (Repos.tmf_other_projects ())
           (Fpath.v "projects")
       in
-      Current_obuilder.build ~pool ~label:"other-projects" data_spec builder
-        (`Dir projects.Current_gitfile.Raw.Git_dir.Value.dir)
+      Current_obuilder.build ~pool ~label:"other-projects" other_projects_spec
+        builder (`Dir projects.Current_gitfile.Raw.Git_dir.Value.dir)
     in
-    ( input_dir / "projects/inputs",
+    ( input_dir / "projects",
       Current_obuilder.run ~pool ~label:"other projects"
         ~shell:[ Obuilder_spec.shell [ "/bin/sh"; "-c" ] ]
         ~snapshot:img builder
-        [ "rm /home/tmf/app/data/" ^ project_name ] )
+        [ "rm /home/tmf/app/data/projects/" ^ project_name ] )
   in
   let cpc, cpc_data =
     let rom = make_rom [ jrc_data ] in
@@ -396,21 +413,16 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~matching
   let elevation, elevation_data =
     srtm_elevation ~pool ~builder ~boundaries:(config_path, config_img)
       ~pixel_matching_boundaries:(matching_area, matching_area_data)
-      inputs
+      matching (* change back to inputs rather matching image ! *)
   in
   let slope, slope_data =
     let rom = make_rom [ elevation_data ] in
-    let slope_out = output_dir / "slope" in
-    ( input_dir / "slope",
-      Current_obuilder.run ~label:"slope" ~pool ~snapshot:inputs ~rom builder
-        (* -s 111120 -compute_edges is a horrific bodge... will create a fairly complicated
-           script to do this properly. *)
-        [
-          Fmt.str
-            "mkdir %s && for i in %s/*; do gdaldem slope -s 111120 \
-             -compute_edges $i %s/slope-$(basename $i); done"
-            slope_out elevation slope_out;
-        ] )
+    let output = "slopes" in
+    python_run ~rom ~label:"calculate slope" ~output
+      ~script_path:"methods.inputs.generate_slope"
+      ~env:[ ("PYTHONPATH", wdir ^ ":$PYTHONPATH") ]
+      ~args:(fun out -> [ "--input"; elevation; "--output"; out ])
+      matching
   in
   let calculate_k, calculate_k_data =
     let rom =
@@ -610,6 +622,8 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~matching
           calculate_k;
           "--s";
           matches / "results.parquet";
+          "--start_year";
+          string_of_int project_config.project_start;
           "--output";
           out;
           "--seed";
@@ -630,6 +644,8 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~matching
           leakage_calculate_k;
           "--s";
           leakage_matching / "results.parquet";
+          "--start_year";
+          string_of_int project_config.project_start;
           "--output";
           out;
           "--seed";

@@ -69,11 +69,11 @@ let pipeline ?auth _token _config _store builder engine_config slack =
     in
     let tmf_matching =
       Evaluations.Repos.tmf_implementation
-        "80e688eea47e115cddf2a45bcd36efca3f500a6e"
+        "fe6130cb02024c730d199f7ef47cc5253be74d5f"
     in
     let tmf_outputs =
       Evaluations.Repos.tmf_implementation
-        "0025760c7ce4c135c569af714ad8f7f33c5a6a7d"
+        "8ab6e530c2ddd4159273823c6404167ed9f086a8"
     in
     (* Control the number of obuilder jobs that can run in parallel *)
     let pool = Current.Pool.create ~label:"obuilder" 1 in
@@ -112,7 +112,8 @@ let pipeline ?auth _token _config _store builder engine_config slack =
          let projects = configurations in
          let projects =
            List.filter
-             (fun (_, c) -> c.Evaluations.Config.vcs_id = 1201)
+             (fun (_, c) ->
+               c.Evaluations.Config.vcs_id = 1201 || c.vcs_id = 1215)
              projects
          in
          let evals =
