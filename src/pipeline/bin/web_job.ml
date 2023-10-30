@@ -333,16 +333,18 @@ let proto_job ~store ~engine ~job_id =
                                |> Uri.to_string))
                     in
                     let table =
-                      match
+                      let csvs =
                         find_paths
                           (fun p -> Filename.extension p = ".csv")
                           src_manifest
-                      with
-                      | data :: _ ->
-                          In_channel.with_open_bin
-                            (Filename.concat src_dir data)
-                          @@ fun ic -> [ Csv.load_in ic ]
-                      | _ -> []
+                      in
+                      List.fold_left
+                        (fun acc data ->
+                          ( In_channel.with_open_bin
+                              (Filename.concat src_dir data)
+                          @@ fun ic -> Csv.load_in ic )
+                          :: acc)
+                        [] csvs
                     in
                     ( Obuilder.Manifest.sexp_of_t src_manifest
                       |> Sexplib.Sexp.to_string_hum,

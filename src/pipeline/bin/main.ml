@@ -65,21 +65,38 @@ let pipeline ?auth _token _config _store builder engine_config slack =
        use branches upstream that we push to. *)
     let tmf_inputs =
       Evaluations.Repos.tmf_implementation
+        "53d8ed3db59435b8c8db42fda95fe58e93e4b6f7"
+    in
+    (* SAVING US FROM WAITING FOR JRC! *)
+    let jrc_input =
+      Evaluations.Repos.tmf_implementation
         "e2c5c23e9fcd271f3899f56f192d79cd7c28684c"
     in
     let tmf_matching =
       Evaluations.Repos.tmf_implementation
-        "fe6130cb02024c730d199f7ef47cc5253be74d5f"
+        "90a5a0dd169e9ff77aca06a8dae0b9d34a205628"
     in
     let tmf_outputs =
       Evaluations.Repos.tmf_implementation
-        "8ab6e530c2ddd4159273823c6404167ed9f086a8"
+        "88ef76ace6205471b10203b7324cf8fa297ab395"
+    in
+    let tmf_potential_matches =
+      Evaluations.Repos.tmf_implementation
+        "8b3cad273d81c99782bcc706142ea0737a5c6cf4"
+    in
+    let tmf_find_pairs =
+      Evaluations.Repos.tmf_implementation
+        "7e10a7af9ac8afc3de8abbd5c3a3e83f7296892b"
     in
     (* Control the number of obuilder jobs that can run in parallel *)
     let pool = Current.Pool.create ~label:"obuilder" 1 in
     let inputs =
       Current_obuilder.build ~pool ~label:"tmf-inputs"
         Evaluations.Python.spec_with_data_dir builder (`Git tmf_inputs)
+    in
+    let jrc_input =
+      Current_obuilder.build ~pool ~label:"tmf-jrc-input"
+        Evaluations.Python.spec_with_data_dir builder (`Git jrc_input)
     in
     let outputs =
       Current_obuilder.build ~pool ~label:"tmf-outputs"
@@ -88,6 +105,14 @@ let pipeline ?auth _token _config _store builder engine_config slack =
     let matching =
       Current_obuilder.build ~pool ~label:"tmf-matching"
         Evaluations.Python.spec_with_data_dir builder (`Git tmf_matching)
+    in
+    let potential_matches =
+      Current_obuilder.build ~pool ~label:"tmf-potential"
+        Evaluations.Python.spec_with_data_dir builder (`Git tmf_potential_matches)
+    in
+    let find_pairs =
+      Current_obuilder.build ~pool ~label:"tmf-pairs"
+        Evaluations.Python.spec_with_data_dir builder (`Git tmf_find_pairs)
     in
     let data = Evaluations.Repos.tmf_data () in
     let projects_dir = Current_gitfile.directory data (Fpath.v "projects") in
@@ -112,16 +137,17 @@ let pipeline ?auth _token _config _store builder engine_config slack =
          let projects = configurations in
          let projects =
            List.filter
-             (fun (_, c) ->
-               c.Evaluations.Config.vcs_id = 1201 || c.vcs_id = 1215)
+             (fun (_, c) -> c.Evaluations.Config.vcs_id = 1201)
              projects
          in
          let evals =
            List.map
              (fun (project_name, project_config) ->
                Evaluations.evaluate ~pool ~projects_dir ~inputs ~outputs
-                 ~matching
-                 ~project_name:(Fpath.filename project_name)
+                 ~matching ~jrc_input
+                 ~potential_matches
+                 ~find_pairs
+                 ~project_name:(Fpath.filename project_name) 
                  ~builder project_config)
              projects
          in
