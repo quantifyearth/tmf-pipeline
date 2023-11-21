@@ -1,9 +1,6 @@
 (executable
  (name main)
  (public_name tmf-pipeline)
- (foreign_stubs
-  (language c)
-  (names tty_stubs))
  (libraries
   evaluations
   current_web
