@@ -2,9 +2,6 @@ open Lwt.Infix
 open Evaluations
 module Server = Cohttp_lwt_unix.Server
 
-external tty_output_buffer_size : Unix.file_descr -> int
-  = "caml_tmf_output_buffer_count"
-
 let ( >>!= ) v f =
   v >>= function
   | Ok v -> f v

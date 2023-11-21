@@ -254,7 +254,7 @@ let page ?(geojsons = []) ?(images = []) ?(tabular = []) ~title ~id ~inputs
                             urls));
                   (match tabular with
                   | [] -> El.void
-                  | data :: _ ->
+                  | datas ->
                       El.splice
                         [
                           El.h2 [ El.txt "Tabular Data" ];
@@ -264,7 +264,7 @@ let page ?(geojsons = []) ?(images = []) ?(tabular = []) ~title ~id ~inputs
                                 "Tables for any CSV files found in the output \
                                  data directory.";
                             ];
-                          Table.render data;
+                          El.splice (List.map Table.render datas);
                         ]);
                   El.h2 [ El.txt "Summary Statistics" ];
                   El.p [ El.em [ El.txt "Coming soon..." ] ];

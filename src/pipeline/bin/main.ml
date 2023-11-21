@@ -51,7 +51,7 @@ let combine_projects_and_configuration projects config =
   in
   find_project config projects
 
-let pipeline ?auth _token _config _store builder engine_config slack =
+let pipeline ?auth builder engine_config slack project_ids =
   let open Current.Syntax in
   let _channel = Some (read_channel_uri slack) in
   let _web_ui =
@@ -65,15 +65,29 @@ let pipeline ?auth _token _config _store builder engine_config slack =
        use branches upstream that we push to. *)
     let tmf_inputs =
       Evaluations.Repos.tmf_implementation
+        "53d8ed3db59435b8c8db42fda95fe58e93e4b6f7"
+    in
+    (* Changing this hash will recompute (i.e. download) the JRC dataset again. Proceed
+       with caution. *)
+    let jrc_input =
+      Evaluations.Repos.tmf_implementation
         "e2c5c23e9fcd271f3899f56f192d79cd7c28684c"
     in
+    (* Changing this hash will recompute the fine circular coverage (FCC) values which takes
+       time and lots of disk space. Proceed with caution. *)
     let tmf_matching =
       Evaluations.Repos.tmf_implementation
-        "fe6130cb02024c730d199f7ef47cc5253be74d5f"
+        "fa0906da430185f5c93ffca56a391c089b6dc991"
     in
+    (* Changing this hash will recompute potential matches and find pairs. *)
+    let tmf_matching_post_fcc =
+      Evaluations.Repos.tmf_implementation
+        "c8b2e73339c0e7281e15b9708b4912820b920aa5"
+    in
+    (* Changing this hash impacts additionality, leakage and permanence. *)
     let tmf_outputs =
       Evaluations.Repos.tmf_implementation
-        "8ab6e530c2ddd4159273823c6404167ed9f086a8"
+        "11ce55772714e1a9d7fa95999bfb75378d071d02"
     in
     (* Control the number of obuilder jobs that can run in parallel *)
     let pool = Current.Pool.create ~label:"obuilder" 1 in
@@ -81,13 +95,22 @@ let pipeline ?auth _token _config _store builder engine_config slack =
       Current_obuilder.build ~pool ~label:"tmf-inputs"
         Evaluations.Python.spec_with_data_dir builder (`Git tmf_inputs)
     in
+    let jrc_input =
+      Current_obuilder.build ~pool ~label:"tmf-jrc-input"
+        Evaluations.Python.spec_with_data_dir builder (`Git jrc_input)
+    in
     let outputs =
       Current_obuilder.build ~pool ~label:"tmf-outputs"
         Evaluations.Python.spec_with_data_dir builder (`Git tmf_outputs)
     in
     let matching =
-      Current_obuilder.build ~pool ~label:"tmf-matching"
+      Current_obuilder.build ~pool ~label:"tmf-matching-fcc"
         Evaluations.Python.spec_with_data_dir builder (`Git tmf_matching)
+    in
+    let matching_post_fcc =
+      Current_obuilder.build ~pool ~label:"tmf-matching-post-fcc"
+        Evaluations.Python.spec_with_data_dir builder
+        (`Git tmf_matching_post_fcc)
     in
     let data = Evaluations.Repos.tmf_data () in
     let projects_dir = Current_gitfile.directory data (Fpath.v "projects") in
@@ -108,19 +131,17 @@ let pipeline ?auth _token _config _store builder engine_config slack =
       Current.component "Evaluate Projects"
       |> let** projects_dir = projects_dir
          and* configurations = configurations in
-         (* TODO: Make this a parameter so we can run the pipeline but not for ALL projects. *)
          let projects = configurations in
          let projects =
            List.filter
-             (fun (_, c) ->
-               c.Evaluations.Config.vcs_id = 1201 || c.vcs_id = 1215)
+             (fun (_, c) -> List.mem c.Evaluations.Config.vcs_id project_ids)
              projects
          in
          let evals =
            List.map
              (fun (project_name, project_config) ->
                Evaluations.evaluate ~pool ~projects_dir ~inputs ~outputs
-                 ~matching
+                 ~matching ~jrc_input ~matching_post_fcc
                  ~project_name:(Fpath.filename project_name)
                  ~builder project_config)
              projects
@@ -144,12 +165,6 @@ let pipeline ?auth _token _config _store builder engine_config slack =
   in
   (engine, site)
 
-let token_url =
-  Arg.required
-  @@ Arg.opt Arg.(some string) None
-  @@ Arg.info ~doc:"A github <user>:<token> URL" ~docv:"GITHUB_TOKEN_FILE"
-       [ "github-token-file" ]
-
 let slack =
   Arg.required
   @@ Arg.opt Arg.(some file) None
@@ -157,30 +172,35 @@ let slack =
        ~doc:"A file containing the URI of the endpoint for status updates."
        ~docv:"URI-FILE" [ "slack" ]
 
+let project_ids =
+  Arg.required
+  @@ Arg.opt Arg.(some (list int)) (Some [ 1201 ])
+  @@ Arg.info
+       ~doc:
+         "A list of project IDs to run separated by commas. Defaults to 1201."
+       ~docv:"PROJECT-IDS" [ "project-ids" ]
+
 let store = Obuilder.Store_spec.cmdliner
 
 let cmd =
   let doc = "Deployer for 4C sites and projects" in
-  let main () config auth (store : Obuilder.Store_spec.store Lwt.t) sandbox
-      engine_config mode token slack capnp =
+  let main () auth (store : Obuilder.Store_spec.store Lwt.t) sandbox
+      engine_config mode slack project_ids capnp =
     Logs.info (fun f -> f "Successfully set credentials");
     let open Lwt.Infix in
     let builder =
-      store >>= fun (Store ((module Store), store_v) as store) ->
+      store >>= fun (Store ((module Store), store_v)) ->
       Obuilder.Sandbox.create ~state_dir:"obuilder-state" sandbox
       >>= fun sandbox ->
       let module Builder =
         Obuilder.Builder (Store) (Obuilder.Sandbox) (Obuilder.Docker)
       in
       Lwt.return
-      @@ ( store,
-           Current_obuilder.Builder
-             ((module Builder), Builder.v ~store:store_v ~sandbox) )
+      @@ Current_obuilder.Builder
+           ((module Builder), Builder.v ~store:store_v ~sandbox)
     in
-    let store, builder = Lwt_main.run builder in
-    let engine, site =
-      pipeline ?auth token config store builder engine_config slack
-    in
+    let builder = Lwt_main.run builder in
+    let engine, site = pipeline ?auth builder engine_config slack project_ids in
     let service_id = Capnp_rpc_unix.Vat_config.derived_id capnp "engine" in
     let restore =
       Capnp_rpc_net.Restorer.single service_id (Rpc.engine engine)
@@ -222,9 +242,9 @@ let cmd =
   Cmd.v
     (Cmd.info "tmf-pipeline" ~doc)
     Term.(
-      const main $ Common.setup_log $ Config.cmdliner
-      $ Current_github.Auth.cmdliner $ store $ Obuilder.Sandbox.cmdliner
-      $ Current.Config.cmdliner $ Current_web.cmdliner $ token_url $ slack
+      const main $ Common.setup_log $ Current_github.Auth.cmdliner $ store
+      $ Obuilder.Sandbox.cmdliner $ Current.Config.cmdliner
+      $ Current_web.cmdliner $ slack $ project_ids
       $ Capnp_rpc_unix.Vat_config.cmd)
 
 let () = Cmd.(exit @@ eval cmd)

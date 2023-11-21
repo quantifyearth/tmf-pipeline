@@ -1,12 +1,29 @@
-4C Evaluation Pipeline
-----------------------
+Tropical Moist Forest Evaluation Methodology Pipeline
+-----------------------------------------------------
 
-An OCurrent pipeline for the 4C evaluations. We use OBuilder to build and run
-different commands for the pipeline. You need to use Linux for this to work
-well.
+This pipeline provides infrastructure for running the [tropical moist forest
+evalulation methodology
+implementation](https://github.com/quantifyearth/tmf-implementation) which
+itself implements [the open-source, ecological
+methodology](https://www.cambridge.org/engage/coe/article-details/647a14a14f8b1884b7b97b55).
+
+![A snapshot of a section of the TMF evaluations methodology pipeline](./docs/pipeline.png)
+
+## Implementation
+
+This pipeline is written using [OCurrent](https://github.com/ocurrent/ocurrent),
+an eDSL in OCaml for building dynamic dataflow programs. We use
+[OBuilder](https://github.com/quantifyearth/obuilder) to build and run the
+various scripts from the methodology implementation. The actual wiring up and
+plumbing is all contained within the
+[`evaluate`](https://github.com/carboncredits/tmf-pipeline/blob/main/src/pipeline/lib/evaluations.ml)
+function.
+
+### Prerequisites for running
 
 You will also need to setup a snapshotting filesystem for OBuilder to store
-build results. One possible backend is ZFS:
+build results. One possible backend is ZFS. A quick but probably not very
+efficient way to get one setup is with the following using `truncate`:
 
 ```
 sudo apt install zfsutils-linux
@@ -14,19 +31,26 @@ truncate --size XG zfs.img
 sudo zpool create obuilder-zfs $PWD/zfs.img
 ```
 
-You can then run the pipeline with:
+You can then run the pipeline with something like:
 
 ```
-dune exec -- ./src/pipeline/bin/main.exe --github-token-file=.token --slack .slack --store=zfs:obuilder-zfs --capnp-secret-key-file=secret-key.pem
+CURRENT_DIR_PREFIX=/some/dir/path dune exec -- ./src/pipeline/bin/main.exe \
+    --slack .slack \
+    --project-ids 1201,3141,1396,944
+    --store=zfs:obuilder-zfs \
+    --capnp-secret-key-file=secret-key.pem \
+    --capnp-listen-address=unix:/tmp/ocurrent.sock \
+    --port=8001
 ```
 
-## Debugging and inspecting
+## Debugging and Inspecting
 
-The pipeline can be interfaced via the command line, and you can checkout a specific build.
-You can have a [hoke](https://www.lrb.co.uk/the-paper/v06/n20/seamus-heaney/two-poems) around
-to try and see what went wrong.
+The pipeline can be interfaced via the command line, and you can checkout a
+specific build. [Hoke](https://github.com/quantifyearth/hoke) is a tool for
+accessing a shell for a specific build within the pipeline. This is ephemeral
+and will be cleaned up when you exit, but it can be a quick way to get something
+running quickly with all the data you need.
 
 ```
-hoke path/to/file.cap
+hoke shell --connect=./secrets/submission.cap --id=<hash>
 ```
-

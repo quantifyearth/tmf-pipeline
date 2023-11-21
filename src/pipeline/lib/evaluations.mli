@@ -36,6 +36,8 @@ val evaluate :
   project_name:string ->
   builder:Current_obuilder.builder ->
   inputs:Current_obuilder.Raw.Build.Value.t Current.t ->
+  jrc_input:Current_obuilder.Raw.Build.Value.t Current.t ->
+  matching_post_fcc:Current_obuilder.Raw.Build.Value.t Current.t ->
   matching:Current_obuilder.Raw.Build.Value.t Current.t ->
   outputs:Current_obuilder.Raw.Build.Value.t Current.t ->
   Config.t ->
