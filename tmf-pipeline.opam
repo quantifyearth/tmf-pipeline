@@ -34,5 +34,8 @@ depends: [
   "current_docker"
   "obuilder"
   "obuilder-spec"
+
+  # Constraints for vendored dirs
+  "tyxml" {= "4.4.0" }
 ]
 synopsis: "Tropical Moist Forest Pipeline"

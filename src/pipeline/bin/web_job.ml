@@ -290,9 +290,9 @@ let proto_job ~store ~engine ~job_id =
       match Current.Job.log_path job_id with
       | Error (`Msg msg) -> Context.respond_error ctx `Bad_request msg
       | Ok path ->
-          let manifest, geojsons, images, tabular =
+          let manifest, geojsons, jsons, images, tabular =
             match find_final_build_result path with
-            | None -> ("No data", [], [], [])
+            | None -> ("No data", [], [], [], [])
             | Some id -> (
                 let src_dir =
                   Fpath.(
@@ -302,11 +302,16 @@ let proto_job ~store ~engine ~job_id =
                 match
                   Obuilder.Manifest.generate ~exclude:[] ~src_dir "data"
                 with
-                | Error (`Msg m) -> (m, [], [], [])
+                | Error (`Msg m) -> (m, [], [], [], [])
                 | Ok src_manifest ->
                     let geojsons =
                       find_paths
                         (fun p -> Filename.extension p = ".geojson")
+                        src_manifest
+                    in
+                    let jsons =
+                      find_paths
+                        (fun p -> Filename.extension p = ".json")
                         src_manifest
                     in
                     let geojsons =
@@ -316,6 +321,9 @@ let proto_job ~store ~engine ~job_id =
                              / (Uri.with_query (Uri.of_string "serve")
                                   [ ("file", [ v ]) ]
                                |> Uri.to_string))
+                    in
+                    let jsons =
+                      List.map (fun v -> In_channel.with_open_bin (Filename.concat src_dir v) @@ In_channel.input_all) jsons
                     in
                     let images =
                       find_paths
@@ -349,12 +357,13 @@ let proto_job ~store ~engine ~job_id =
                     ( Obuilder.Manifest.sexp_of_t src_manifest
                       |> Sexplib.Sexp.to_string_hum,
                       geojsons,
+                      jsons,
                       images,
                       table ))
           in
           let inputs = input_jobs ~id:job_id (Current.Engine.pipeline engine) in
           let page =
-            Pages.Build.page ~geojsons ~images ~tabular ~manifest ~title:"Build"
+            Pages.Build.page ~geojsons ~jsons ~images ~tabular ~manifest ~title:"Build"
               ~id:job_id ~inputs ()
           in
           let body =

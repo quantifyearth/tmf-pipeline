@@ -39,9 +39,23 @@ val evaluate :
   jrc_input:Current_obuilder.Raw.Build.Value.t Current.t ->
   matching_post_fcc:Current_obuilder.Raw.Build.Value.t Current.t ->
   matching:Current_obuilder.Raw.Build.Value.t Current.t ->
+  (* elevation_fix:Current_obuilder.Raw.Build.Value.t Current.t -> *)
   outputs:Current_obuilder.Raw.Build.Value.t Current.t ->
   Config.t ->
-  unit Current.t
+  Current_obuilder.output Current.Node.t *
+  unit Current.Node.t 
 (** The evaluation pipeline for a particular project. The [config_img] contains the
       configuration file in an OBuilder image and the final build argument contains the
-      base image used for the evaluation itself (e.g. a python-geo image). *)
+      base image used for the evaluation itself (e.g. a python-geo image).
+      
+      Returns the config image and the pairs image. *)
+
+val build_and_publish_data :
+  pool:unit Current.Pool.t ->
+  data:(string
+  * Current_obuilder.output Current.term
+  * Current_obuilder.output Current.term)
+  list ->
+  snapshot:Current_obuilder.output Current.term ->
+  Current_obuilder.builder ->
+  Current_obuilder.output Current.term

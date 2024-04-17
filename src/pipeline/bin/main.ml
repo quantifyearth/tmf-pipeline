@@ -82,12 +82,17 @@ let pipeline ?auth builder engine_config slack project_ids =
     (* Changing this hash will recompute potential matches and find pairs. *)
     let tmf_matching_post_fcc =
       Evaluations.Repos.tmf_implementation
-        "c8b2e73339c0e7281e15b9708b4912820b920aa5"
+        (* "32ae2b5d326e1e07b94999bedab2ceda05e8441c" *)
+        "552616d6e41526c631ea8ce43ed1b59ca356241e"
+    in
+    let elevation_fix =
+      Evaluations.Repos.tmf_implementation
+        "e20a685f2952727e7d2f9e962428b64988ca0f19"
     in
     (* Changing this hash impacts additionality, leakage and permanence. *)
     let tmf_outputs =
       Evaluations.Repos.tmf_implementation
-        "11ce55772714e1a9d7fa95999bfb75378d071d02"
+        "ac9ae25aac095827be8e5740774eb9737ece57bd"
     in
     (* Control the number of obuilder jobs that can run in parallel *)
     let pool = Current.Pool.create ~label:"obuilder" 1 in
@@ -112,6 +117,11 @@ let pipeline ?auth builder engine_config slack project_ids =
         Evaluations.Python.spec_with_data_dir builder
         (`Git tmf_matching_post_fcc)
     in
+    let _elevation_fix = 
+      Current_obuilder.build ~pool ~label:"tmf-elevation-fix"
+      Evaluations.Python.spec_with_data_dir builder
+      (`Git elevation_fix)
+    in
     let data = Evaluations.Repos.tmf_data () in
     let projects_dir = Current_gitfile.directory data (Fpath.v "projects") in
     let configurations =
@@ -134,18 +144,20 @@ let pipeline ?auth builder engine_config slack project_ids =
          let projects = configurations in
          let projects =
            List.filter
-             (fun (_, c) -> List.mem c.Evaluations.Config.vcs_id project_ids)
+             (fun (_, (c : Evaluations.Config.t)) -> List.mem c.vcs_id project_ids)
              projects
          in
          let evals =
            List.map
-             (fun (project_name, project_config) ->
+             (fun (project_name, (project_config : Evaluations.Config.t)) ->
+              string_of_int project_config.vcs_id,
                Evaluations.evaluate ~pool ~projects_dir ~inputs ~outputs
                  ~matching ~jrc_input ~matching_post_fcc
                  ~project_name:(Fpath.filename project_name)
                  ~builder project_config)
              projects
          in
+         let evals = List.fold_left (fun acc (_, (add, copy)) -> (Current.ignore_value add) :: (Current.ignore_value copy) :: acc) [] evals in 
          Current.all evals
     in
     others
