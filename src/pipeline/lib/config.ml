@@ -3,7 +3,7 @@ type t = {
   vcs_id : int;
   country_code : string;
   project_start : int;
-  source: string option; [@default None]
+  source : string option; [@default None]
   agb : float array option; [@default None]
 }
 [@@deriving yojson]
@@ -12,7 +12,7 @@ type old_t = {
   vcs_id : int;
   country_code : string;
   start_year : int;
-  source: string option; [@default None]
+  source : string option; [@default None]
   agb : float array option; [@default None]
 }
 [@@deriving yojson]
@@ -26,7 +26,7 @@ let t_of_old_t (t : old_t) : t =
     agb = t.agb;
   }
 
-let of_yojson y = 
+let of_yojson y =
   match of_yojson y with
-    | Ok v -> Ok v
-    | Error _ -> Result.map t_of_old_t (old_t_of_yojson y)
+  | Ok v -> Ok v
+  | Error _ -> Result.map t_of_old_t (old_t_of_yojson y)

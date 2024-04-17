@@ -173,8 +173,8 @@ module Table = struct
     | _ -> El.txt "Something went wrong rendering the tabluar data"
 end
 
-let page ?(geojsons = []) ?(jsons = []) ?(images = []) ?(tabular = []) ~title ~id ~inputs
-    ~manifest () =
+let page ?(geojsons = []) ?(jsons = []) ?(images = []) ?(tabular = []) ~title
+    ~id ~inputs ~manifest () =
   let open Htmlit in
   El.splice
     [
@@ -252,7 +252,7 @@ let page ?(geojsons = []) ?(jsons = []) ?(images = []) ?(tabular = []) ~title ~i
                             (fun url ->
                               El.img ~at:[ At.v "width" "100%"; At.src url ] ())
                             urls));
-              (match jsons with
+                  (match jsons with
                   | [] -> El.void
                   | contents ->
                       El.splice
@@ -261,7 +261,8 @@ let page ?(geojsons = []) ?(jsons = []) ?(images = []) ?(tabular = []) ~title ~i
                            El.p
                              [
                                El.txt
-                                 "Raw JSON files that are not geospatial in nature.";
+                                 "Raw JSON files that are not geospatial in \
+                                  nature.";
                              ];
                          ]
                         @ List.map

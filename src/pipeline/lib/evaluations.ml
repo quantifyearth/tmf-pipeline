@@ -264,35 +264,38 @@ let label l t =
 (* For Quantify.earth -- we'd love to decouple this from the
    pipeline itself, but for the sake of speed and results we're putting it
    here. *)
-let build_and_publish_data 
-  ~pool
-  ~data
-  ~snapshot
-   builder
-  =
+let build_and_publish_data ~pool ~data ~snapshot builder =
   (* First copy all of the data to the output *)
-  let area_of_interest = List.map (fun (_, aoi, _) -> aoi) data in 
-  let pairs = List.map (fun (_, _, pairs) -> pairs) data in 
+  let area_of_interest = List.map (fun (_, aoi, _) -> aoi) data in
+  let pairs = List.map (fun (_, _, pairs) -> pairs) data in
   let rom = make_rom (area_of_interest @ pairs) in
-  Current_obuilder.run ~pool ~rom ~label:"quantify.earth" ~snapshot builder [ Fmt.str "ls -la %s && cp -r %s %s" input_dir input_dir output_dir ]
+  Current_obuilder.run ~pool ~rom ~label:"quantify.earth" ~snapshot builder
+    [ Fmt.str "ls -la %s && cp -r %s %s" input_dir input_dir output_dir ]
 
 let run_command command =
   Logs.info (fun f -> f "Running %s" command);
   Sys.command command
 
-let copy_data_out
-  ~(config_img:Current_obuilder.output Current.term)
-  ~(pairs_img:Current_obuilder.output Current.term)
-  ~(carbon_density:Current_obuilder.output Current.term)
-  =
-  let+ config_img = config_img and+ pairs_img = pairs_img and+ carbon_density = carbon_density in
+(* No one is happy about this code, but it makes my life easier --patrick *)
+let copy_data_out ~(config_img : Current_obuilder.output Current.term)
+    ~(pairs_img : Current_obuilder.output Current.term)
+    ~(leakage_pairs_data : Current_obuilder.output Current.term)
+    ~(carbon_density : Current_obuilder.output Current.term) =
+  let+ config_img = config_img
+  and+ pairs_img = pairs_img
+  and+ leakage_pairs_data = leakage_pairs_data
+  and+ carbon_density = carbon_density in
   let path = Fmt.str "/obuilder-zfs/result/%s/rootfs/home/tmf/app/data" in
   let config = path config_img.snapshot in
   let pairs = path pairs_img.snapshot in
+  let leakage_pairs = path leakage_pairs_data.snapshot in
   let density = path carbon_density.snapshot in
-  let _ = run_command @@ Fmt.str "rsync -aHq %s/ /maps/pf341/results/live-pipeline" config in
-  let _ = run_command @@ Fmt.str "rsync -aHq %s/ /maps/pf341/results/live-pipeline" pairs in
-  let _ = run_command @@ Fmt.str "rsync -aHq %s/ /maps/pf341/results/live-pipeline" density in  ()
+  let output = "/maps/pf341/results/2024-04" in
+  let _ = run_command @@ Fmt.str "rsync -aHq %s/ %s" config output in
+  let _ = run_command @@ Fmt.str "rsync -aHq %s/ %s" pairs output in
+  let _ = run_command @@ Fmt.str "rsync -aHq %s/ %s" leakage_pairs output in
+  let _ = run_command @@ Fmt.str "rsync -aHq %s/ %s" density output in
+  ()
 
 let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
     ~matching_post_fcc ~matching ~outputs (project_config : Config.t) =
@@ -507,8 +510,8 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
     in
     (c, cd, project_matching_area, project_matching_area_data)
   in
-  let ( _leakage_country_raster,
-        _leakage_country_raster_data,
+  let ( leakage_country_raster,
+        leakage_country_raster_data,
         leakage_matching_area,
         leakage_matching_area_data ) =
     let country_list, country_list_data =
@@ -781,9 +784,7 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
         ])
       matching_post_fcc
   in
-  (* LEAKAGE is currently disabled whilst we work out additionality
-     properly. *)
-  (* let leakage_calculate_k, leakage_calculate_k_data =
+  let leakage_calculate_k, leakage_calculate_k_data =
     let rom =
       make_rom
         [
@@ -827,8 +828,8 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
           out;
         ])
       matching
-  in *)
-  (* let leakage_matching, leakage_matching_data =
+  in
+  let leakage_matching, leakage_matching_data =
     let match_rasters, match_rasters_data =
       let rom =
         make_rom
@@ -876,8 +877,8 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
             out;
           ])
         matching_post_fcc
-    in *)
-    (* let m_raster, m_raster_data =
+    in
+    let leakage_m_raster, leakage_m_raster_data =
       let rom = make_rom [ match_rasters_data ] in
       python_run ~rom ~label:"build m raster (leakage)"
         ~output:(project_name_no_geojson ^ "-leakage-matching-rasters")
@@ -885,11 +886,11 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
         ~args:(fun out ->
           [ "--rasters_directory"; match_rasters; "--output"; out ])
         matching_post_fcc
-    in *)
-    (* let rom =
+    in
+    let rom =
       make_rom
         [
-          m_raster_data;
+          leakage_m_raster_data;
           leakage_matching_area_data;
           jrc_data;
           fcc_cpc_data;
@@ -907,7 +908,7 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
       ~args:(fun out ->
         [
           "--raster";
-          m_raster;
+          leakage_m_raster;
           "--matching";
           leakage_matching_area;
           "--start_year";
@@ -932,7 +933,7 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
           out;
         ])
       matching_post_fcc
-  in *)
+  in
   let pairs, pairs_data =
     let rom = make_rom [ calculate_k_data; matches_data ] in
     let output = project_name_no_geojson ^ "_pairs" in
@@ -955,7 +956,7 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
         ])
       matching_post_fcc
   in
-  (* let _leakage_pairs, _leakage_pairs_data =
+  let leakage_pairs, leakage_pairs_data =
     let rom = make_rom [ leakage_calculate_k_data; leakage_matching_data ] in
     let output = project_name_no_geojson ^ "_leakage_pairs" in
     python_run ~rom ~label:"pairs (leakage)" ~output
@@ -976,103 +977,110 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
           "3";
         ])
       matching_post_fcc
-  in *)
+  in
   let additionality =
     let rom = make_rom [ config_img; carbon_data; pairs_data ] in
     let output = project_name_no_geojson ^ "-additionality.csv" in
     Current.collapse ~key:"project" ~value:project_name
-      ~input:(label project_name outputs) @@ snd @@
-    python_run ~rom ~label:"additionality" ~output
-      ~env:[ ("TMF_PARTIALS", output_dir) ]
-      ~script_path:"methods.outputs.calculate_additionality"
-      ~args:(fun out ->
-        [
-          "--project";
-          config_path;
-          "--project_start";
-          string_of_int project_config.project_start;
-          "--evaluation_year";
-          "2021";
-          "--density";
-          carbon;
-          "--matches";
-          pairs;
-          "--output";
-          out;
-        ])
-      outputs
+      ~input:(label project_name outputs)
+    @@ snd
+    @@ python_run ~rom ~label:"additionality" ~output
+         ~env:[ ("TMF_PARTIALS", output_dir) ]
+         ~script_path:"methods.outputs.calculate_additionality"
+         ~args:(fun out ->
+           [
+             "--project";
+             config_path;
+             "--project_start";
+             string_of_int project_config.project_start;
+             "--evaluation_year";
+             "2021";
+             "--density";
+             carbon;
+             "--matches";
+             pairs;
+             "--output";
+             out;
+           ])
+         outputs
   in
-  (* let leakage, leakage_data =
+  let leakage =
     let rom =
       make_rom
         [ config_img; carbon_data; leakage_pairs_data; leakage_zone_data ]
     in
     let output = project_name_no_geojson ^ "-leakage.csv" in
-    python_run ~rom ~label:"leakage" ~output
-      ~env:[ ("TMF_PARTIALS", output_dir) ]
-      ~script_path:"methods.outputs.calculate_leakage"
-      ~args:(fun out ->
-        [
-          "--project";
-          config_path;
-          "--leakage_zone";
-          leakage_zone;
-          "--project_start";
-          string_of_int project_config.project_start;
-          "--evaluation_year";
-          "2021";
-          "--density";
-          carbon;
-          "--matches";
-          leakage_pairs;
-          "--output";
-          out;
-        ])
-      outputs
-  in *)
-  (* let scc, scc_data =
-    let spec =
-      Obuilder_spec.stage ~from:(`Image "ghcr.io/osgeo/gdal:ubuntu-small-3.6.4")
-        Obuilder_spec.
-          [
-            run "useradd -ms /bin/bash -u 1000 tmf";
-            workdir wdir;
-            run "chown -R tmf:tmf /home/tmf";
-            Obuilder_spec.user_unix ~uid:1000 ~gid:1000;
-            run "mkdir %s" output_dir;
-            copy [ "." ] ~dst:".";
-            run "cp scc/scc.csv %s/scc.csv" output_dir;
-          ]
-    in
-    ( input_dir / "scc.csv",
-      Current_obuilder.build ~pool ~label:"scc" spec builder
-        (`Git
-          (Repos.tmf_data ~gref:"9c72799bb99c5279a676fcaa71976d1512f42d55" ()))
-    )
-  in *)
-  (* let permanence =
-    let rom = make_rom [ additionality_data; leakage_data; scc_data ] in
-    let output = project_name_no_geojson ^ "-result.json" in
     Current.collapse ~key:"project" ~value:project_name
       ~input:(label project_name outputs)
     @@ snd
-    @@ python_run ~rom ~output
-         ~label:("permanence " ^ String.lowercase_ascii project_name)
-         ~script_path:"methods.outputs.calculate_permanence"
+    @@ python_run ~rom ~label:"leakage" ~output
+         ~env:[ ("TMF_PARTIALS", output_dir) ]
+         ~script_path:"methods.outputs.calculate_leakage"
          ~args:(fun out ->
            [
-             "--additionality";
-             additionality;
-             "--leakage";
-             leakage;
-             "--scc";
-             scc;
-             "--current_year";
+             "--project";
+             config_path;
+             "--leakage_zone";
+             leakage_zone;
+             "--project_start";
+             string_of_int project_config.project_start;
+             "--evaluation_year";
              "2021";
+             "--density";
+             carbon;
+             "--matches";
+             leakage_pairs;
              "--output";
              out;
            ])
          outputs
-  in *)
-  let copy = copy_data_out ~config_img ~pairs_img:pairs_data ~carbon_density:carbon_data in
-  additionality, copy
+  in
+  (* let scc, scc_data =
+       let spec =
+         Obuilder_spec.stage ~from:(`Image "ghcr.io/osgeo/gdal:ubuntu-small-3.6.4")
+           Obuilder_spec.
+             [
+               run "useradd -ms /bin/bash -u 1000 tmf";
+               workdir wdir;
+               run "chown -R tmf:tmf /home/tmf";
+               Obuilder_spec.user_unix ~uid:1000 ~gid:1000;
+               run "mkdir %s" output_dir;
+               copy [ "." ] ~dst:".";
+               run "cp scc/scc.csv %s/scc.csv" output_dir;
+             ]
+       in
+       ( input_dir / "scc.csv",
+         Current_obuilder.build ~pool ~label:"scc" spec builder
+           (`Git
+             (Repos.tmf_data ~gref:"9c72799bb99c5279a676fcaa71976d1512f42d55" ()))
+       )
+     in *)
+  (* let permanence =
+       let rom = make_rom [ additionality_data; leakage_data; scc_data ] in
+       let output = project_name_no_geojson ^ "-result.json" in
+       Current.collapse ~key:"project" ~value:project_name
+         ~input:(label project_name outputs)
+       @@ snd
+       @@ python_run ~rom ~output
+            ~label:("permanence " ^ String.lowercase_ascii project_name)
+            ~script_path:"methods.outputs.calculate_permanence"
+            ~args:(fun out ->
+              [
+                "--additionality";
+                additionality;
+                "--leakage";
+                leakage;
+                "--scc";
+                scc;
+                "--current_year";
+                "2021";
+                "--output";
+                out;
+              ])
+            outputs
+     in *)
+  let copy =
+    copy_data_out ~config_img ~pairs_img:pairs_data ~leakage_pairs_data
+      ~carbon_density:carbon_data
+  in
+  (additionality, leakage, copy)

@@ -323,7 +323,11 @@ let proto_job ~store ~engine ~job_id =
                                |> Uri.to_string))
                     in
                     let jsons =
-                      List.map (fun v -> In_channel.with_open_bin (Filename.concat src_dir v) @@ In_channel.input_all) jsons
+                      List.map
+                        (fun v ->
+                          In_channel.with_open_bin (Filename.concat src_dir v)
+                          @@ In_channel.input_all)
+                        jsons
                     in
                     let images =
                       find_paths
@@ -363,8 +367,8 @@ let proto_job ~store ~engine ~job_id =
           in
           let inputs = input_jobs ~id:job_id (Current.Engine.pipeline engine) in
           let page =
-            Pages.Build.page ~geojsons ~jsons ~images ~tabular ~manifest ~title:"Build"
-              ~id:job_id ~inputs ()
+            Pages.Build.page ~geojsons ~jsons ~images ~tabular ~manifest
+              ~title:"Build" ~id:job_id ~inputs ()
           in
           let body =
             Cohttp_lwt.Body.of_string (Htmlit.El.to_string ~doctype:true page)
