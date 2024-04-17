@@ -117,10 +117,9 @@ let pipeline ?auth builder engine_config slack project_ids =
         Evaluations.Python.spec_with_data_dir builder
         (`Git tmf_matching_post_fcc)
     in
-    let _elevation_fix = 
+    let _elevation_fix =
       Current_obuilder.build ~pool ~label:"tmf-elevation-fix"
-      Evaluations.Python.spec_with_data_dir builder
-      (`Git elevation_fix)
+        Evaluations.Python.spec_with_data_dir builder (`Git elevation_fix)
     in
     let data = Evaluations.Repos.tmf_data () in
     let projects_dir = Current_gitfile.directory data (Fpath.v "projects") in
@@ -144,20 +143,27 @@ let pipeline ?auth builder engine_config slack project_ids =
          let projects = configurations in
          let projects =
            List.filter
-             (fun (_, (c : Evaluations.Config.t)) -> List.mem c.vcs_id project_ids)
+             (fun (_, (c : Evaluations.Config.t)) ->
+               List.mem c.vcs_id project_ids)
              projects
          in
          let evals =
            List.map
              (fun (project_name, (project_config : Evaluations.Config.t)) ->
-              string_of_int project_config.vcs_id,
-               Evaluations.evaluate ~pool ~projects_dir ~inputs ~outputs
-                 ~matching ~jrc_input ~matching_post_fcc
-                 ~project_name:(Fpath.filename project_name)
-                 ~builder project_config)
+               ( string_of_int project_config.vcs_id,
+                 Evaluations.evaluate ~pool ~projects_dir ~inputs ~outputs
+                   ~matching ~jrc_input ~matching_post_fcc
+                   ~project_name:(Fpath.filename project_name)
+                   ~builder project_config ))
              projects
          in
-         let evals = List.fold_left (fun acc (_, (add, copy)) -> (Current.ignore_value add) :: (Current.ignore_value copy) :: acc) [] evals in 
+         let evals =
+           List.fold_left
+             (fun acc (_, (add, leak, copy)) ->
+               Current.ignore_value add :: Current.ignore_value leak
+               :: Current.ignore_value copy :: acc)
+             [] evals
+         in
          Current.all evals
     in
     others
