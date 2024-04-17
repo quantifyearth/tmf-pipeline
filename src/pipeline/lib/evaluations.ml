@@ -116,7 +116,7 @@ module Repos = struct
     Git.clone ~gref ~schedule
       "git@github.com:carboncredits/tmf-implementation.git"
 
-  let tmf_data ?(gref = "e4578f37cb96b635237ca6112eb03be13f0072a3") () =
+  let tmf_data ?(gref = "1e38b34bf83064f30754320f515b32de5cb4fee2") () =
     (* ALL PROJECTS *)
     (* Git.clone ~gref:"db7a7d1255d4a4860c87646a5443f28da4f05692" ~schedule "git@github.com:carboncredits/tmf-data.git" *)
     Git.clone ~gref ~schedule "git@github.com:carboncredits/tmf-data.git"
@@ -260,6 +260,39 @@ let label l t =
   Current.component "%s" l
   |> let> v = t in
      Current.Primitive.const v
+
+(* For Quantify.earth -- we'd love to decouple this from the
+   pipeline itself, but for the sake of speed and results we're putting it
+   here. *)
+let build_and_publish_data 
+  ~pool
+  ~data
+  ~snapshot
+   builder
+  =
+  (* First copy all of the data to the output *)
+  let area_of_interest = List.map (fun (_, aoi, _) -> aoi) data in 
+  let pairs = List.map (fun (_, _, pairs) -> pairs) data in 
+  let rom = make_rom (area_of_interest @ pairs) in
+  Current_obuilder.run ~pool ~rom ~label:"quantify.earth" ~snapshot builder [ Fmt.str "ls -la %s && cp -r %s %s" input_dir input_dir output_dir ]
+
+let run_command command =
+  Logs.info (fun f -> f "Running %s" command);
+  Sys.command command
+
+let copy_data_out
+  ~(config_img:Current_obuilder.output Current.term)
+  ~(pairs_img:Current_obuilder.output Current.term)
+  ~(carbon_density:Current_obuilder.output Current.term)
+  =
+  let+ config_img = config_img and+ pairs_img = pairs_img and+ carbon_density = carbon_density in
+  let path = Fmt.str "/obuilder-zfs/result/%s/rootfs/home/tmf/app/data" in
+  let config = path config_img.snapshot in
+  let pairs = path pairs_img.snapshot in
+  let density = path carbon_density.snapshot in
+  let _ = run_command @@ Fmt.str "rsync -aHq %s/ /maps/pf341/results/live-pipeline" config in
+  let _ = run_command @@ Fmt.str "rsync -aHq %s/ /maps/pf341/results/live-pipeline" pairs in
+  let _ = run_command @@ Fmt.str "rsync -aHq %s/ /maps/pf341/results/live-pipeline" density in  ()
 
 let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
     ~matching_post_fcc ~matching ~outputs (project_config : Config.t) =
@@ -751,155 +784,155 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
   (* LEAKAGE is currently disabled whilst we work out additionality
      properly. *)
   (* let leakage_calculate_k, leakage_calculate_k_data =
-       let rom =
-         make_rom
-           [
-             leakage_zone_data;
-             eco_data;
-             access_data;
-             jrc_data;
-             cpc_data;
-             elevation_data;
-             slope_data;
-             leakage_country_raster_data;
-           ]
-       in
-       let output = project_name_no_geojson ^ "-leakage-k.parquet" in
-       python_run ~rom ~label:"calculate k (leakage)" ~output
-         ~script_path:"methods.matching.calculate_k"
-         ~env:[ ("PYTHONPATH", wdir ^ ":$PYTHONPATH") ]
-         ~args:(fun out ->
-           [
-             "--project";
-             leakage_zone;
-             "--start_year";
-             string_of_int project_config.project_start;
-             "--evaluation_year";
-             "2021";
-             "--jrc";
-             jrc;
-             "--cpc";
-             cpc;
-             "--ecoregions";
-             eco;
-             "--elevation";
-             elevation;
-             "--slope";
-             slope;
-             "--access";
-             access;
-             "--countries-raster";
-             leakage_country_raster;
-             "--output";
-             out;
-           ])
-         matching
-     in
-     let leakage_matching, leakage_matching_data =
-       let match_rasters, match_rasters_data =
-         let rom =
-           make_rom
-             [
-               leakage_matching_area_data;
-               leakage_calculate_k_data;
-               eco_data;
-               access_data;
-               jrc_data;
-               rescaled_cpc_data;
-               elevation_data;
-               slope_data;
-               leakage_country_raster_data;
-             ]
-         in
-         let output = project_name_no_geojson ^ "-leakage-matches" in
-         python_run ~rom ~label:"potential matchings (leakage)" ~output
-           ~script_path:"methods.matching.find_potential_matches"
-           ~env:[ ("PYTHONPATH", wdir ^ ":$PYTHONPATH") ]
-           ~args:(fun out ->
-             [
-               "--k";
-               leakage_calculate_k;
-               "--matching";
-               leakage_matching_area;
-               "--start_year";
-               string_of_int project_config.project_start;
-               "--evaluation_year";
-               "2021";
-               "--jrc";
-               jrc;
-               "--cpc";
-               rescaled_cpc;
-               "--ecoregions";
-               eco;
-               "--elevation";
-               elevation;
-               "--slope";
-               slope;
-               "--countries-raster";
-               leakage_country_raster;
-               "--access";
-               access;
-               "--output";
-               out;
-             ])
-           matching
-       in
-       let m_raster, m_raster_data =
-         let rom = make_rom [ match_rasters_data ] in
-         python_run ~rom ~label:"build m raster (leakage)"
-           ~output:(project_name_no_geojson ^ "-leakage-matching-rasters")
-           ~script_path:"methods.matching.build_m_raster"
-           ~args:(fun out ->
-             [ "--rasters_directory"; match_rasters; "--output"; out ])
-           matching
-       in
-       let rom =
-         make_rom
-           [
-             m_raster_data;
-             leakage_matching_area_data;
-             jrc_data;
-             cpc_data;
-             eco_data;
-             elevation_data;
-             slope_data;
-             access_data;
-             project_country_raster_data;
-           ]
-       in
-       let output = project_name_no_geojson ^ "-leakage-matches.parquet" in
-       python_run ~rom ~label:"M Leakage (All potential matches)" ~output
-         ~script_path:"methods.matching.build_m_table"
-         ~env:[ ("PYTHONPATH", wdir ^ ":$PYTHONPATH") ]
-         ~args:(fun out ->
-           [
-             "--raster";
-             m_raster;
-             "--matching";
-             leakage_matching_area;
-             "--start_year";
-             string_of_int project_config.project_start;
-             "--evaluation_year";
-             "2021";
-             "--jrc";
-             jrc;
-             "--cpc";
-             cpc;
-             "--ecoregions";
-             eco;
-             "--elevation";
-             elevation;
-             "--slope";
-             slope;
-             "--access";
-             access;
-             "--countries-raster";
-             project_country_raster;
-             "--output";
-             out;
-           ])
-         matching
-     in *)
+    let rom =
+      make_rom
+        [
+          leakage_zone_data;
+          eco_data;
+          access_data;
+          jrc_data;
+          cpc_data;
+          elevation_data;
+          slope_data;
+          leakage_country_raster_data;
+        ]
+    in
+    let output = project_name_no_geojson ^ "-leakage-k.parquet" in
+    python_run ~rom ~label:"calculate k (leakage)" ~output
+      ~script_path:"methods.matching.calculate_k"
+      ~env:[ ("PYTHONPATH", wdir ^ ":$PYTHONPATH") ]
+      ~args:(fun out ->
+        [
+          "--project";
+          leakage_zone;
+          "--start_year";
+          string_of_int project_config.project_start;
+          "--evaluation_year";
+          "2021";
+          "--jrc";
+          jrc;
+          "--cpc";
+          cpc;
+          "--ecoregions";
+          eco;
+          "--elevation";
+          elevation;
+          "--slope";
+          slope;
+          "--access";
+          access;
+          "--countries-raster";
+          leakage_country_raster;
+          "--output";
+          out;
+        ])
+      matching
+  in *)
+  (* let leakage_matching, leakage_matching_data =
+    let match_rasters, match_rasters_data =
+      let rom =
+        make_rom
+          [
+            leakage_matching_area_data;
+            leakage_calculate_k_data;
+            eco_data;
+            access_data;
+            jrc_data;
+            fcc_cpc_data;
+            elevation_data;
+            slope_data;
+            leakage_country_raster_data;
+          ]
+      in
+      let output = project_name_no_geojson ^ "-leakage-matches" in
+      python_run ~rom ~label:"potential matchings (leakage)" ~output
+        ~script_path:"methods.matching.find_potential_matches"
+        ~env:[ ("PYTHONPATH", wdir ^ ":$PYTHONPATH") ]
+        ~args:(fun out ->
+          [
+            "--k";
+            leakage_calculate_k;
+            "--matching";
+            leakage_matching_area;
+            "--start_year";
+            string_of_int project_config.project_start;
+            "--evaluation_year";
+            "2021";
+            "--jrc";
+            jrc;
+            "--cpc";
+            fcc_cpc;
+            "--ecoregions";
+            eco;
+            "--elevation";
+            elevation;
+            "--slope";
+            slope;
+            "--countries-raster";
+            leakage_country_raster;
+            "--access";
+            access;
+            "--output";
+            out;
+          ])
+        matching_post_fcc
+    in *)
+    (* let m_raster, m_raster_data =
+      let rom = make_rom [ match_rasters_data ] in
+      python_run ~rom ~label:"build m raster (leakage)"
+        ~output:(project_name_no_geojson ^ "-leakage-matching-rasters")
+        ~script_path:"methods.matching.build_m_raster"
+        ~args:(fun out ->
+          [ "--rasters_directory"; match_rasters; "--output"; out ])
+        matching_post_fcc
+    in *)
+    (* let rom =
+      make_rom
+        [
+          m_raster_data;
+          leakage_matching_area_data;
+          jrc_data;
+          fcc_cpc_data;
+          eco_data;
+          elevation_data;
+          slope_data;
+          access_data;
+          project_country_raster_data;
+        ]
+    in
+    let output = project_name_no_geojson ^ "-leakage-matches.parquet" in
+    python_run ~rom ~label:"M Leakage (All potential matches)" ~output
+      ~script_path:"methods.matching.build_m_table"
+      ~env:[ ("PYTHONPATH", wdir ^ ":$PYTHONPATH") ]
+      ~args:(fun out ->
+        [
+          "--raster";
+          m_raster;
+          "--matching";
+          leakage_matching_area;
+          "--start_year";
+          string_of_int project_config.project_start;
+          "--evaluation_year";
+          "2021";
+          "--jrc";
+          jrc;
+          "--cpc";
+          fcc_cpc;
+          "--ecoregions";
+          eco;
+          "--elevation";
+          elevation;
+          "--slope";
+          slope;
+          "--access";
+          access;
+          "--countries-raster";
+          project_country_raster;
+          "--output";
+          out;
+        ])
+      matching_post_fcc
+  in *)
   let pairs, pairs_data =
     let rom = make_rom [ calculate_k_data; matches_data ] in
     let output = project_name_no_geojson ^ "_pairs" in
@@ -918,37 +951,39 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
           "--seed";
           "42";
           "-j";
-          "2";
+          "1";
         ])
-      matching
+      matching_post_fcc
   in
-  (* let leakage_pairs, leakage_pairs_data =
-       let rom = make_rom [ leakage_calculate_k_data; leakage_matching_data ] in
-       let output = project_name_no_geojson ^ "_leakage_pairs" in
-       python_run ~rom ~label:"pairs (leakage)" ~output
-         ~script_path:"methods.matching.find_pairs"
-         ~args:(fun out ->
-           [
-             "--k";
-             leakage_calculate_k;
-             "--s";
-             leakage_matching;
-             "--start_year";
-             string_of_int project_config.project_start;
-             "--output";
-             out;
-             "--seed";
-             "42";
-             "-j";
-             (if project_name_no_geojson = "1215" then "5" else "10");
-           ])
-         matching
-     in *)
-  let additionality, additionality_data =
+  (* let _leakage_pairs, _leakage_pairs_data =
+    let rom = make_rom [ leakage_calculate_k_data; leakage_matching_data ] in
+    let output = project_name_no_geojson ^ "_leakage_pairs" in
+    python_run ~rom ~label:"pairs (leakage)" ~output
+      ~script_path:"methods.matching.find_pairs"
+      ~args:(fun out ->
+        [
+          "--k";
+          leakage_calculate_k;
+          "--m";
+          leakage_matching;
+          "--start_year";
+          string_of_int project_config.project_start;
+          "--output";
+          out;
+          "--seed";
+          "42";
+          "-j";
+          "3";
+        ])
+      matching_post_fcc
+  in *)
+  let additionality =
     let rom = make_rom [ config_img; carbon_data; pairs_data ] in
     let output = project_name_no_geojson ^ "-additionality.csv" in
+    Current.collapse ~key:"project" ~value:project_name
+      ~input:(label project_name outputs) @@ snd @@
     python_run ~rom ~label:"additionality" ~output
-      ~env:[ ("DUMPDIR", output_dir) ]
+      ~env:[ ("TMF_PARTIALS", output_dir) ]
       ~script_path:"methods.outputs.calculate_additionality"
       ~args:(fun out ->
         [
@@ -968,34 +1003,34 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
       outputs
   in
   (* let leakage, leakage_data =
-       let rom =
-         make_rom
-           [ config_img; carbon_data; leakage_pairs_data; leakage_zone_data ]
-       in
-       let output = project_name_no_geojson ^ "-leakage.csv" in
-       python_run ~rom ~label:"leakage" ~output
-         ~env:[ ("DUMPDIR", output_dir) ]
-         ~script_path:"methods.outputs.calculate_leakage"
-         ~args:(fun out ->
-           [
-             "--project";
-             config_path;
-             "--leakage_zone";
-             leakage_zone;
-             "--project_start";
-             string_of_int project_config.project_start;
-             "--evaluation_year";
-             "2021";
-             "--density";
-             carbon;
-             "--matches";
-             leakage_pairs;
-             "--output";
-             out;
-           ])
-         outputs
-     in *)
-  let scc, scc_data =
+    let rom =
+      make_rom
+        [ config_img; carbon_data; leakage_pairs_data; leakage_zone_data ]
+    in
+    let output = project_name_no_geojson ^ "-leakage.csv" in
+    python_run ~rom ~label:"leakage" ~output
+      ~env:[ ("TMF_PARTIALS", output_dir) ]
+      ~script_path:"methods.outputs.calculate_leakage"
+      ~args:(fun out ->
+        [
+          "--project";
+          config_path;
+          "--leakage_zone";
+          leakage_zone;
+          "--project_start";
+          string_of_int project_config.project_start;
+          "--evaluation_year";
+          "2021";
+          "--density";
+          carbon;
+          "--matches";
+          leakage_pairs;
+          "--output";
+          out;
+        ])
+      outputs
+  in *)
+  (* let scc, scc_data =
     let spec =
       Obuilder_spec.stage ~from:(`Image "ghcr.io/osgeo/gdal:ubuntu-small-3.6.4")
         Obuilder_spec.
@@ -1014,9 +1049,9 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
         (`Git
           (Repos.tmf_data ~gref:"9c72799bb99c5279a676fcaa71976d1512f42d55" ()))
     )
-  in
-  let permanence =
-    let rom = make_rom [ additionality_data; scc_data ] in
+  in *)
+  (* let permanence =
+    let rom = make_rom [ additionality_data; leakage_data; scc_data ] in
     let output = project_name_no_geojson ^ "-result.json" in
     Current.collapse ~key:"project" ~value:project_name
       ~input:(label project_name outputs)
@@ -1028,8 +1063,8 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
            [
              "--additionality";
              additionality;
-             (* "--leakage";
-                leakage; *)
+             "--leakage";
+             leakage;
              "--scc";
              scc;
              "--current_year";
@@ -1038,5 +1073,6 @@ let evaluate ~pool ~projects_dir ~project_name ~builder ~inputs ~jrc_input
              out;
            ])
          outputs
-  in
-  Current.ignore_value permanence
+  in *)
+  let copy = copy_data_out ~config_img ~pairs_img:pairs_data ~carbon_density:carbon_data in
+  additionality, copy
